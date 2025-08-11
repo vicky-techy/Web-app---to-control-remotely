@@ -3,143 +3,286 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>STM32 SMS Controller</title>
+    <title>MQTT Control Panel for STM32</title>
     <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Google Fonts: Inter -->
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <!-- MQTT.js client library -->
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
-        /* Custom styles */
+        /* Custom font and minor style adjustments */
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
         body {
             font-family: 'Inter', sans-serif;
-            -webkit-tap-highlight-color: transparent; /* Disable tap highlight on mobile */
         }
-        /* Simple transition for buttons */
-        .control-btn {
-            transition: all 0.1s ease-in-out;
+        .log-entry {
+            border-left-width: 4px;
         }
-        /* Style for button press effect */
-        .control-btn:active {
-            transform: scale(0.95);
-            opacity: 0.9;
-        }
+        .log-entry-info { border-color: #3b82f6; }
+        .log-entry-success { border-color: #22c55e; }
+        .log-entry-error { border-color: #ef4444; }
+        .log-entry-message { border-color: #eab308; }
     </style>
 </head>
-<body class="bg-gray-900 text-white flex items-center justify-center min-h-screen">
+<body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 flex items-center justify-center min-h-screen p-4">
 
-    <div class="w-full max-w-sm p-6 bg-gray-800 rounded-2xl shadow-2xl">
-        
+    <div class="w-full max-w-2xl bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
         <!-- Header -->
-        <div class="text-center mb-6">
-            <h1 class="text-2xl font-bold text-cyan-400">STM32 Controller</h1>
-            <p class="text-gray-400 mt-1">Control your project via SMS</p>
+        <div class="text-center">
+            <h1 class="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">STM32 MQTT Control Panel</h1>
+            <p class="text-gray-500 dark:text-gray-400 mt-1">Control your device via HiveMQ Cloud</p>
         </div>
 
-        <!-- Phone Number Input -->
-        <div class="mb-6">
-            <label for="phoneNumber" class="block text-sm font-medium text-gray-300 mb-2">SIM900A Module Number</label>
-            <input type="tel" id="phoneNumber" class="w-full px-4 py-3 bg-gray-700 border border-gray-600 rounded-lg text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500" placeholder="Enter phone number...">
+        <!-- Connection Status -->
+        <div id="status-badge" class="flex items-center justify-center p-3 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 font-semibold transition-colors duration-300">
+            <span id="status-indicator" class="w-3 h-3 rounded-full bg-gray-400 mr-3"></span>
+            <span id="status-text">DISCONNECTED</span>
+        </div>
+
+        <!-- Connection Settings -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="col-span-1 md:col-span-2">
+                <label for="cluster-url" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Cluster URL</label>
+                <input type="text" id="cluster-url" placeholder="e.g., YOUR_CLUSTER_URL.s1.eu.hivemq.cloud" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+            </div>
+            <div>
+                <label for="username" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Username</label>
+                <input type="text" id="username" placeholder="Your HiveMQ Username" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+            </div>
+            <div>
+                <label for="password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Password</label>
+                <input type="password" id="password" placeholder="Your HiveMQ Password" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+            </div>
         </div>
         
-        <!-- Error Message Display -->
-        <div id="messageBox" class="text-red-400 text-center text-sm mb-4 h-5"></div>
+        <!-- Connect / Disconnect Buttons -->
+        <div class="flex space-x-4">
+            <button id="connect-btn" class="w-full flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-transform transform hover:scale-105">Connect</button>
+            <button id="disconnect-btn" class="w-full flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-transform transform hover:scale-105" disabled>Disconnect</button>
+        </div>
 
-        <!-- Controls -->
-        <div id="controls" class="space-y-4">
-            <!-- Red LED Controls -->
-            <div class="grid grid-cols-2 gap-4">
-                <button data-command="red on" class="control-btn bg-red-600 hover:bg-red-500 text-white font-bold py-4 rounded-lg shadow-lg">
-                    RED ON
-                </button>
-                <button data-command="red off" class="control-btn bg-gray-600 hover:bg-gray-500 text-white font-bold py-4 rounded-lg shadow-lg">
-                    RED OFF
-                </button>
-            </div>
-
-            <!-- Green LED Controls -->
-            <div class="grid grid-cols-2 gap-4">
-                <button data-command="green on" class="control-btn bg-green-600 hover:bg-green-500 text-white font-bold py-4 rounded-lg shadow-lg">
-                    GREEN ON
-                </button>
-                <button data-command="green off" class="control-btn bg-gray-600 hover:bg-gray-500 text-white font-bold py-4 rounded-lg shadow-lg">
-                    GREEN OFF
-                </button>
-            </div>
-
-            <!-- Blue LED Controls -->
-            <div class="grid grid-cols-2 gap-4">
-                <button data-command="blue on" class="control-btn bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-lg shadow-lg">
-                    BLUE ON
-                </button>
-                <button data-command="blue off" class="control-btn bg-gray-600 hover:bg-gray-500 text-white font-bold py-4 rounded-lg shadow-lg">
-                    BLUE OFF
-                </button>
+        <!-- Control Buttons -->
+        <div id="control-panel" class="pt-4 border-t border-gray-200 dark:border-gray-700 hidden">
+            <h2 class="text-lg font-semibold text-center mb-4">LED Controls</h2>
+            <div class="space-y-4">
+                <!-- Red LED Row -->
+                <div class="grid grid-cols-2 gap-4">
+                    <button data-command="red on" class="command-btn bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">RED ON</button>
+                    <button data-command="red off" class="command-btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">RED OFF</button>
+                </div>
+                <!-- Green LED Row -->
+                <div class="grid grid-cols-2 gap-4">
+                    <button data-command="green on" class="command-btn bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">GREEN ON</button>
+                    <button data-command="green off" class="command-btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">GREEN OFF</button>
+                </div>
+                <!-- Blue LED Row -->
+                <div class="grid grid-cols-2 gap-4">
+                    <button data-command="blue on" class="command-btn bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">BLUE ON</button>
+                    <button data-command="blue off" class="command-btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">BLUE OFF</button>
+                </div>
             </div>
         </div>
 
+        <!-- Log Area -->
+        <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
+            <h2 class="text-lg font-semibold text-center mb-2">Event Log</h2>
+            <div id="log-area" class="h-48 bg-gray-100 dark:bg-gray-900 rounded-lg p-3 overflow-y-auto space-y-2">
+                <!-- Log entries will be added here -->
+            </div>
+        </div>
     </div>
 
     <script>
-        // Get references to the DOM elements
-        const controlsContainer = document.getElementById('controls');
-        const phoneNumberInput = document.getElementById('phoneNumber');
-        const messageBox = document.getElementById('messageBox');
+        // DOM Elements
+        const clusterUrlInput = document.getElementById('cluster-url');
+        const usernameInput = document.getElementById('username');
+        const passwordInput = document.getElementById('password');
+        const connectBtn = document.getElementById('connect-btn');
+        const disconnectBtn = document.getElementById('disconnect-btn');
+        const statusBadge = document.getElementById('status-badge');
+        const statusIndicator = document.getElementById('status-indicator');
+        const statusText = document.getElementById('status-text');
+        const controlPanel = document.getElementById('control-panel');
+        const logArea = document.getElementById('log-area');
+        const commandBtns = document.querySelectorAll('.command-btn');
+
+        let client = null;
+
+        // Topics from your STM32 configuration
+        const MQTT_TOPIC_PUBLISH_CONTROL = "stm32/control";
+        const MQTT_TOPIC_SUBSCRIBE_STATUS = "stm32/status";
 
         /**
-         * Handles the click event on the control buttons.
-         * It constructs an SMS URI and redirects to the default messaging app.
-         * @param {Event} e - The click event object.
+         * Adds a new entry to the log area with appropriate styling.
+         * @param {string} message - The message to log.
+         * @param {string} type - The type of log (info, success, error, message).
          */
-        function handleControlClick(e) {
-            // Use event delegation to handle clicks on buttons
-            if (e.target.tagName !== 'BUTTON') {
-                return; // Exit if the click was not on a button
-            }
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry p-2 rounded-md bg-opacity-20 text-sm`;
+            const typeClassMap = {
+                info: 'log-entry-info bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200',
+                success: 'log-entry-success bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200',
+                error: 'log-entry-error bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200',
+                message: 'log-entry-message bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200'
+            };
+            entry.classList.add(...typeClassMap[type].split(' '));
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logArea.appendChild(entry);
+            logArea.scrollTop = logArea.scrollHeight; // Auto-scroll to bottom
+        }
 
-            // Get the phone number from the input field
-            const phoneNumber = phoneNumberInput.value.trim();
-            
-            // Validate if the phone number is entered
-            if (!phoneNumber) {
-                messageBox.textContent = 'Please enter a phone number first.';
-                // Add a visual cue to the input field
-                phoneNumberInput.classList.add('animate-pulse');
-                setTimeout(() => {
-                    phoneNumberInput.classList.remove('animate-pulse');
-                    messageBox.textContent = ''; // Clear message after a few seconds
-                }, 3000);
-                return;
-            }
-            
-            // Clear any previous messages
-            messageBox.textContent = '';
-
-            // Get the command from the button's data attribute
-            const command = e.target.dataset.command;
-
-            if (command) {
-                // Encode the command to be safely used in a URL
-                const encodedCommand = encodeURIComponent(command);
-                
-                // --- Smart SMS Link Formatter ---
-                // iOS devices require a different format for SMS links with a message body.
-                // We detect the OS and use the correct separator.
-                const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-                const separator = isIOS ? '&' : '?';
-
-                // Construct the SMS link with the correct format for the device.
-                const smsLink = `sms:${phoneNumber}${separator}body=${encodedCommand}`;
-                
-                // Redirect to the SMS link to open the messaging app
-                window.location.href = smsLink;
+        /**
+         * Updates the UI to reflect the current connection status.
+         * @param {string} status - The connection status ('connected', 'disconnected', 'connecting', 'error').
+         */
+        function updateStatusUI(status) {
+            switch (status) {
+                case 'connected':
+                    statusIndicator.className = 'w-3 h-3 rounded-full bg-green-500 animate-pulse';
+                    statusText.textContent = 'CONNECTED';
+                    statusBadge.className = 'flex items-center justify-center p-3 rounded-lg bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-200 font-semibold';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    controlPanel.style.display = 'block';
+                    break;
+                case 'disconnected':
+                    statusIndicator.className = 'w-3 h-3 rounded-full bg-gray-400';
+                    statusText.textContent = 'DISCONNECTED';
+                    statusBadge.className = 'flex items-center justify-center p-3 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 font-semibold';
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    controlPanel.style.display = 'none';
+                    break;
+                case 'connecting':
+                    statusIndicator.className = 'w-3 h-3 rounded-full bg-yellow-500 animate-spin';
+                    statusText.textContent = 'CONNECTING...';
+                    statusBadge.className = 'flex items-center justify-center p-3 rounded-lg bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 font-semibold';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = true;
+                    break;
+                case 'error':
+                     statusIndicator.className = 'w-3 h-3 rounded-full bg-red-500';
+                    statusText.textContent = 'CONNECTION FAILED';
+                    statusBadge.className = 'flex items-center justify-center p-3 rounded-lg bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200 font-semibold';
+                    connectBtn.disabled = false;
+                    disconnectBtn.disabled = true;
+                    controlPanel.style.display = 'none';
+                    break;
             }
         }
 
-        // Add a single event listener to the parent container for efficiency
-        controlsContainer.addEventListener('click', handleControlClick);
-    </script>
+        /**
+         * Handles the connection logic to the MQTT broker.
+         */
+        function connectToBroker() {
+            const clusterUrl = clusterUrlInput.value.trim();
+            const username = usernameInput.value.trim();
+            const password = passwordInput.value.trim();
 
+            if (!clusterUrl || !username || !password) {
+                log('Cluster URL, Username, and Password are required.', 'error');
+                return;
+            }
+
+            // Use wss (WebSocket Secure) for browser-based MQTT over HTTPS
+            const brokerUrl = `wss://${clusterUrl}:8884/mqtt`;
+            const options = {
+                clientId: `webapp_${Math.random().toString(16).substr(2, 8)}`,
+                username: username,
+                password: password,
+                clean: true,
+                connectTimeout: 4000,
+            };
+
+            log(`Attempting to connect to ${brokerUrl}...`, 'info');
+            updateStatusUI('connecting');
+
+            client = mqtt.connect(brokerUrl, options);
+
+            // --- MQTT Client Event Handlers ---
+
+            client.on('connect', () => {
+                log('Successfully connected to HiveMQ Cloud!', 'success');
+                updateStatusUI('connected');
+                
+                // Subscribe to the status topic
+                client.subscribe(MQTT_TOPIC_SUBSCRIBE_STATUS, { qos: 0 }, (err) => {
+                    if (!err) {
+                        log(`Subscribed to topic: ${MQTT_TOPIC_SUBSCRIBE_STATUS}`, 'success');
+                    } else {
+                        log(`Subscription failed: ${err.message}`, 'error');
+                    }
+                });
+            });
+
+            client.on('error', (err) => {
+                log(`Connection error: ${err.message}`, 'error');
+                updateStatusUI('error');
+                client.end();
+            });
+
+            client.on('reconnect', () => {
+                log('Reconnecting...', 'info');
+                updateStatusUI('connecting');
+            });
+
+            client.on('close', () => {
+                if (statusText.textContent !== 'DISCONNECTED') {
+                    log('Connection closed.', 'info');
+                    updateStatusUI('disconnected');
+                }
+            });
+
+            client.on('message', (topic, message) => {
+                log(`Message received on topic ${topic}: ${message.toString()}`, 'message');
+            });
+        }
+
+        /**
+         * Disconnects from the MQTT broker.
+         */
+        function disconnectFromBroker() {
+            if (client) {
+                client.end();
+                log('Disconnected by user.', 'info');
+                updateStatusUI('disconnected');
+            }
+        }
+
+        /**
+         * Publishes a message to the control topic.
+         * @param {string} command - The command to send.
+         */
+        function publishCommand(command) {
+            if (client && client.connected) {
+                client.publish(MQTT_TOPIC_PUBLISH_CONTROL, command, { qos: 0, retain: false }, (err) => {
+                    if (err) {
+                        log(`Failed to publish command: ${err.message}`, 'error');
+                    } else {
+                        log(`Published command: "${command}" to ${MQTT_TOPIC_PUBLISH_CONTROL}`, 'info');
+                    }
+                });
+            } else {
+                log('Cannot publish. Client is not connected.', 'error');
+            }
+        }
+
+        // --- Event Listeners ---
+
+        connectBtn.addEventListener('click', connectToBroker);
+        disconnectBtn.addEventListener('click', disconnectFromBroker);
+
+        commandBtns.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const command = btn.getAttribute('data-command');
+                publishCommand(command);
+            });
+        });
+        
+        // Initialize UI
+        updateStatusUI('disconnected');
+        log('App initialized. Enter credentials and connect.');
+
+    </script>
 </body>
 </html>
