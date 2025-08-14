@@ -21,41 +21,6 @@
         .log-entry-success { border-color: #22c55e; }
         .log-entry-error { border-color: #ef4444; }
         .log-entry-message { border-color: #eab308; }
-        
-        /* --- Broker Label Styling --- */
-        /* Default state (unselected, light mode) */
-        .broker-label {
-            border-color: #d1d5db; /* gray-300 */
-        }
-        .broker-label span {
-            color: #1f2937; /* gray-800 */
-        }
-
-        /* Default state (unselected, dark mode) */
-        .dark .broker-label {
-            border-color: #4b5563; /* gray-600 */
-        }
-        .dark .broker-label span {
-            color: #d1d5db; /* gray-300 */
-        }
-
-        /* Selected State (light mode) */
-        .broker-label-selected {
-            border-color: #4f46e5; /* indigo-600 */
-            background-color: #eef2ff; /* indigo-50 */
-        }
-        .broker-label-selected span {
-            color: #3730a3; /* indigo-800 */
-        }
-
-        /* Selected State (dark mode) */
-        .dark .broker-label-selected {
-            border-color: #6366f1; /* indigo-500 */
-            background-color: #3730a3; /* indigo-800 */
-        }
-        .dark .broker-label-selected span {
-            color: #eef2ff; /* indigo-50 */
-        }
     </style>
 </head>
 <body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 flex items-center justify-center min-h-screen p-4">
@@ -77,13 +42,17 @@
         <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
              <h2 class="text-lg font-semibold text-center mb-3">Select Broker</h2>
              <div id="broker-selection" class="grid grid-cols-2 gap-4">
-                <label class="broker-label broker-label-selected flex items-center justify-center space-x-2 p-3 rounded-lg border-2 cursor-pointer transition-all">
-                    <input type="radio" name="broker" value="hivemq" class="form-radio text-indigo-600 focus:ring-indigo-500" checked>
-                    <span class="font-medium">HiveMQ Cloud</span>
+                <label>
+                    <input type="radio" name="broker" value="hivemq" class="hidden peer" checked>
+                    <div class="flex items-center justify-center space-x-2 p-3 rounded-lg border-2 cursor-pointer transition-all border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-300 peer-checked:border-indigo-600 dark:peer-checked:border-indigo-500 peer-checked:bg-indigo-50 dark:peer-checked:bg-indigo-800 peer-checked:text-indigo-800 dark:peer-checked:text-indigo-50">
+                        <span class="font-medium">HiveMQ Cloud</span>
+                    </div>
                 </label>
-                <label class="broker-label flex items-center justify-center space-x-2 p-3 rounded-lg border-2 cursor-pointer transition-all">
-                    <input type="radio" name="broker" value="mosquitto" class="form-radio text-indigo-600 focus:ring-indigo-500">
-                    <span class="font-medium">Local Mosquitto</span>
+                <label>
+                    <input type="radio" name="broker" value="mosquitto" class="hidden peer">
+                     <div class="flex items-center justify-center space-x-2 p-3 rounded-lg border-2 cursor-pointer transition-all border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-300 peer-checked:border-indigo-600 dark:peer-checked:border-indigo-500 peer-checked:bg-indigo-50 dark:peer-checked:bg-indigo-800 peer-checked:text-indigo-800 dark:peer-checked:text-indigo-50">
+                        <span class="font-medium">Local Mosquitto</span>
+                    </div>
                 </label>
             </div>
         </div>
@@ -96,22 +65,22 @@
         <div id="mosquitto-settings" class="hidden">
              <div class="grid grid-cols-2 gap-4">
                 <div>
-                    <label for="ip-address" class="block text-sm font-medium text-gray-700 dark:text-gray-300">IP Address</label>
-                    <input type="text" id="ip-address" placeholder="e.g., localhost or 192.168.1.5" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <label for="ip-address" class="block text-sm font-medium text-gray-700 dark:text-gray-300">IP Address / Domain</label>
+                    <input type="text" id="ip-address" placeholder="e.g., ec2-....com" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
                 </div>
                 <div>
-                    <label for="port" class="block text-sm font-medium text-gray-700 dark:text-gray-300">WebSocket Port</label>
-                    <input type="number" id="port" value="9001" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                    <label for="port" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Secure WebSocket Port</label>
+                    <input type="number" id="port" value="8081" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
                 </div>
             </div>
         </div>
         <div id="common-settings" class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-                <label for="username" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Username <span class="text-xs">(Optional for Mosquitto)</span></label>
+                <label for="username" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Username <span class="text-xs">(Optional)</span></label>
                 <input type="text" id="username" placeholder="Your MQTT Username" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
             </div>
             <div>
-                <label for="password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Password <span class="text-xs">(Optional for Mosquitto)</span></label>
+                <label for="password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Password <span class="text-xs">(Optional)</span></label>
                 <input type="password" id="password" placeholder="Your MQTT Password" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
             </div>
         </div>
@@ -175,7 +144,6 @@
         const brokerSelection = document.getElementById('broker-selection');
         const hivemqSettings = document.getElementById('hivemq-settings');
         const mosquittoSettings = document.getElementById('mosquitto-settings');
-        const brokerLabels = document.querySelectorAll('.broker-label');
 
         let client = null;
 
@@ -233,7 +201,7 @@
                     statusText.textContent = 'CONNECTING...';
                     statusBadge.className = 'flex items-center justify-center p-3 rounded-lg bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 font-semibold';
                     connectBtn.disabled = true;
-                    disconnectBtn.disabled = true;
+                    disconnectBtn.disabled = false; // **FIX**: Allow disconnect during connection attempts
                     break;
             }
         }
@@ -242,6 +210,10 @@
          * Handles the connection logic to the MQTT broker.
          */
         function connectToBroker() {
+            if (client) {
+                log('A connection attempt is already in progress.', 'info');
+                return;
+            }
             const selectedBroker = document.querySelector('input[name="broker"]:checked').value;
             const username = usernameInput.value.trim();
             const password = passwordInput.value.trim();
@@ -250,10 +222,10 @@
             const options = {
                 clientId: `webapp_${Math.random().toString(16).substr(2, 8)}`,
                 clean: true,
-                connectTimeout: 4000,
+                connectTimeout: 5000,
+                reconnectPeriod: 5000 // Don't reconnect too aggressively
             };
             
-            // Only add username/password to options if they are provided
             if (username) options.username = username;
             if (password) options.password = password;
 
@@ -263,7 +235,6 @@
                     log('Cluster URL, Username, and Password are required for HiveMQ.', 'error');
                     return;
                 }
-                // Use wss (WebSocket Secure) for HiveMQ Cloud
                 brokerUrl = `wss://${clusterUrl}:8884/mqtt`;
             } else { // mosquitto
                 const ipAddress = ipAddressInput.value.trim();
@@ -272,10 +243,9 @@
                     log('IP Address and Port are required for Mosquitto.', 'error');
                     return;
                 }
-                // Use ws (unsecured WebSocket) for local Mosquitto.
-                // Note: Your Mosquitto broker must be configured to listen on this WebSocket port (default is 9001).
-                // The standard MQTT port 1883 will NOT work from a browser.
-                brokerUrl = `ws://${ipAddress}:${port}/mqtt`;
+                brokerUrl = `wss://${ipAddress}:${port}/mqtt`;
+                // **CRITICAL FIX**: Allow self-signed certificates.
+                options.rejectUnauthorized = false;
             }
 
             log(`Attempting to connect to ${brokerUrl}...`, 'info');
@@ -297,21 +267,20 @@
             });
 
             client.on('error', (err) => {
-                log(`Connection error: ${err.message}`, 'error');
-                updateStatusUI('error');
-                client.end();
+                log(`Connection error: ${err.message}.`, 'error');
+                console.error('MQTT Client Error:', err); // **DEBUGGING**: Log the full error object
             });
 
             client.on('reconnect', () => {
-                log('Reconnecting...', 'info');
+                log('Attempting to reconnect...', 'info');
+                console.warn('MQTT reconnect event triggered.'); // **DEBUGGING**
                 updateStatusUI('connecting');
             });
 
             client.on('close', () => {
-                // Only log 'closed' if it wasn't an intentional disconnect or a connection failure
-                if (connectBtn.disabled && !disconnectBtn.disabled) {
-                     log('Connection closed.', 'info');
-                     updateStatusUI('disconnected');
+                console.info('MQTT close event triggered.'); // **DEBUGGING**
+                if (client) {
+                    updateStatusUI('error');
                 }
             });
 
@@ -321,13 +290,18 @@
         }
 
         /**
-         * Disconnects from the MQTT broker.
+         * Disconnects from the MQTT broker forcefully.
          */
         function disconnectFromBroker() {
             if (client) {
-                client.end();
-                log('Disconnected by user.', 'info');
-                updateStatusUI('disconnected');
+                log('Disconnecting by user.', 'info');
+                client.end(true, {}, () => {
+                    log('Successfully disconnected.', 'success');
+                    client = null;
+                    updateStatusUI('disconnected');
+                });
+            } else {
+                 updateStatusUI('disconnected');
             }
         }
 
@@ -353,20 +327,8 @@
          */
         function handleBrokerSwitch(e) {
             const selectedValue = e.target.value;
-
-            // Toggle visibility of settings blocks
             hivemqSettings.style.display = selectedValue === 'hivemq' ? 'block' : 'none';
             mosquittoSettings.style.display = selectedValue === 'mosquitto' ? 'block' : 'none';
-
-            // Update styling of the selection labels
-            brokerLabels.forEach(label => {
-                const radio = label.querySelector('input');
-                if (radio.value === selectedValue) {
-                    label.classList.add('broker-label-selected');
-                } else {
-                    label.classList.remove('broker-label-selected');
-                }
-            });
         }
 
         // --- Event Listeners ---
@@ -382,6 +344,7 @@
         });
         
         // --- Initialize UI ---
+        handleBrokerSwitch({ target: { value: 'hivemq' } }); // Set initial state
         updateStatusUI('disconnected');
         log('App initialized. Select your broker, enter credentials, and connect.');
 
