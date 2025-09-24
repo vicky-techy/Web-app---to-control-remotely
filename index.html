@@ -60,18 +60,16 @@
         <!-- Connection Settings -->
         <div id="hivemq-settings">
             <label for="cluster-url" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Cluster URL</label>
-            <input type="text" id="cluster-url" placeholder="e.g., YOUR_CLUSTER_URL.s1.eu.hivemq.cloud" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+            <input type="text" id="cluster-url" value="8509ebde5dbe4d0487ba5e2483b1aba6.s1.eu.hivemq.cloud" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
         </div>
-        <div id="mosquitto-settings" class="hidden">
-             <div class="grid grid-cols-2 gap-4">
-                <div>
-                    <label for="ip-address" class="block text-sm font-medium text-gray-700 dark:text-gray-300">IP Address / Domain</label>
-                    <input type="text" id="ip-address" placeholder="e.g., ec2-....com" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                </div>
-                <div>
-                    <label for="port" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Secure WebSocket Port</label>
-                    <input type="number" id="port" value="8081" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                </div>
+        <div id="mosquitto-settings" class="hidden space-y-4">
+            <div>
+                <label for="ip-address" class="block text-sm font-medium text-gray-700 dark:text-gray-300">IP Address / Domain</label>
+                <input type="text" id="ip-address" placeholder="e.g., ec2-....com" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+            </div>
+            <div>
+                <label for="port" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Secure WebSocket Port</label>
+                <input type="number" id="port" value="8081" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
             </div>
         </div>
         <div id="common-settings" class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -201,7 +199,7 @@
                     statusText.textContent = 'CONNECTING...';
                     statusBadge.className = 'flex items-center justify-center p-3 rounded-lg bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 font-semibold';
                     connectBtn.disabled = true;
-                    disconnectBtn.disabled = false; // **FIX**: Allow disconnect during connection attempts
+                    disconnectBtn.disabled = false;
                     break;
             }
         }
@@ -210,10 +208,11 @@
          * Handles the connection logic to the MQTT broker.
          */
         function connectToBroker() {
-            if (client) {
-                log('A connection attempt is already in progress.', 'info');
+            if (client && (client.connecting || client.connected)) {
+                log('Connection already in progress or established.', 'info');
                 return;
             }
+
             const selectedBroker = document.querySelector('input[name="broker"]:checked').value;
             const username = usernameInput.value.trim();
             const password = passwordInput.value.trim();
@@ -222,8 +221,8 @@
             const options = {
                 clientId: `webapp_${Math.random().toString(16).substr(2, 8)}`,
                 clean: true,
-                connectTimeout: 5000,
-                reconnectPeriod: 5000 // Don't reconnect too aggressively
+                connectTimeout: 4000,
+                reconnectPeriod: 5000 
             };
             
             if (username) options.username = username;
@@ -243,8 +242,7 @@
                     log('IP Address and Port are required for Mosquitto.', 'error');
                     return;
                 }
-                brokerUrl = `wss://${ipAddress}:${port}/mqtt`;
-                // **CRITICAL FIX**: Allow self-signed certificates.
+                brokerUrl = `wss://${ipAddress}:${port}`;
                 options.rejectUnauthorized = false;
             }
 
@@ -267,19 +265,26 @@
             });
 
             client.on('error', (err) => {
-                log(`Connection error: ${err.message}.`, 'error');
-                console.error('MQTT Client Error:', err); // **DEBUGGING**: Log the full error object
+                log(`Connection error. See browser console for details.`, 'error');
+                console.error('MQTT Client Error:', err);
+                if (client) {
+                    client.end(true); // Force close on error
+                    client = null;
+                    updateStatusUI('error');
+                }
             });
 
             client.on('reconnect', () => {
                 log('Attempting to reconnect...', 'info');
-                console.warn('MQTT reconnect event triggered.'); // **DEBUGGING**
                 updateStatusUI('connecting');
             });
 
             client.on('close', () => {
-                console.info('MQTT close event triggered.'); // **DEBUGGING**
-                if (client) {
+                // This event fires after disconnect or on connection failure.
+                // We only want to show an error if it wasn't a user-initiated disconnect.
+                if (client) { 
+                    log('Connection closed unexpectedly.', 'error');
+                    client = null; // Clear the client to allow a new connection attempt
                     updateStatusUI('error');
                 }
             });
@@ -294,7 +299,9 @@
          */
         function disconnectFromBroker() {
             if (client) {
-                log('Disconnecting by user.', 'info');
+                log('Disconnecting from broker...', 'info');
+                // Temporarily remove the 'close' listener to prevent it from firing as an error
+                client.removeAllListeners('close'); 
                 client.end(true, {}, () => {
                     log('Successfully disconnected.', 'success');
                     client = null;
@@ -351,3 +358,4 @@
     </script>
 </body>
 </html>
+
