@@ -239,7 +239,10 @@
                                     devicePower ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-xl shadow-rose-200' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-xl shadow-blue-200'
                                 }`}>
                                     {isPublishing ? <Icon name="refresh" className="animate-spin" size={20} /> : <Icon name="send" size={20} className="transition-transform group-hover:translate-x-1" />}
-                                    {devicePower ? 'POWER OFF' : 'POWER ON'}
+                                    {isPublishing 
+                                        ? (devicePower ? 'POWERING ON' : 'POWERING OFF') 
+                                        : (devicePower ? 'POWER OFF' : 'POWER ON')
+                                    }
                                 </button>
 
                                 {/* High-End 3D Plug and Socket Animation */}
@@ -288,8 +291,8 @@
                                     
                                     <div className={`flex items-center gap-2 mt-2 px-5 py-1.5 rounded-full border shadow-sm transition-all duration-500 transform ${showSuccess ? 'scale-100 translate-y-0' : 'scale-90 translate-y-2'} ${confirmedState === 'ON' ? 'bg-emerald-50 border-emerald-100 text-emerald-600' : 'bg-rose-50 border-rose-100 text-rose-600'}`}>
                                         <Icon name="check" size={16} strokeWidth={4} />
-                                        <span className="font-bold text-xs uppercase tracking-widest">
-                                            {confirmedState === 'ON' ? 'Powered ON' : 'Powered OFF'}
+                                        <span className="font-bold text-xs camelcase tracking-widest">
+                                            {confirmedState === 'ON' ? 'Powered On' : 'Powered Off'}
                                         </span>
                                     </div>
                                 </div>
