@@ -12,7 +12,8 @@ import {
   Server,
   LogOut,
   AlertCircle,
-  ShieldAlert
+  ShieldAlert,
+  CircuitBoard
 } from 'lucide-react';
 
 // MQTT library from CDN
@@ -67,21 +68,18 @@ const App = () => {
       return;
     }
 
-    // MANDATORY SECURITY CHECK for Mixed Content
     if (window.location.protocol === 'https:' && protocol === 'ws') {
       setStatus('error');
       setErrorLog('BROWSER SECURITY BLOCK: HTTPS sites cannot connect to "ws" brokers. Please use "wss" or switch this page to HTTP.');
       return;
     }
 
-    // Clean up existing client
     if (client) {
       client.end(true);
     }
 
     setStatus('connecting');
     
-    // CONSTRUCTION: Use the same pattern as the successful older version
     const brokerUrl = `${protocol}://${brokerIp}:${brokerPort}`;
     
     try {
@@ -91,14 +89,13 @@ const App = () => {
         protocolVersion: 4,
         clean: true,
         reconnectPeriod: 1000,
-        connectTimeout: 30 * 1000, // Increased timeout
+        connectTimeout: 30 * 1000,
         clientId: 'web_client_' + Math.random().toString(16).substring(2, 8)
       };
 
       const mqttClient = window.mqtt.connect(brokerUrl, options);
 
       mqttClient.on('connect', () => {
-        console.log("Connected Successfully");
         setStatus('connected');
         setErrorLog('');
         setConfig({ ip: brokerIp, port: brokerPort, protocol });
@@ -113,7 +110,6 @@ const App = () => {
       });
 
       mqttClient.on('error', (err) => {
-        console.error('MQTT Connection Error:', err);
         setStatus('error');
         setErrorLog(`Link Failed: ${err.message || 'Check IP and EC2 Security Rules'}`);
         mqttClient.end();
@@ -131,7 +127,6 @@ const App = () => {
 
       setClient(mqttClient);
     } catch (err) {
-      console.error('System Exception:', err);
       setStatus('error');
       setErrorLog(`System Error: ${err.message}`);
     }
@@ -153,7 +148,6 @@ const App = () => {
     setIsPublishing(true);
     setDevicePower(newState);
     
-    // Use QOS 1 for guaranteed delivery
     client.publish("stm32/control", message, { qos: 1 });
   };
 
@@ -189,21 +183,34 @@ const App = () => {
       {/* Main Control Card */}
       <main className="w-full max-w-2xl bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden relative">
         <div className="p-8 md:p-12 flex flex-col items-center text-center">
-          <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-6 transition-all duration-500 ${
-            isConnected && devicePower ? 'bg-blue-100 text-blue-600 shadow-inner' : 
-            isConnected ? 'bg-slate-100 text-slate-400' : 'bg-slate-50 text-slate-300'
+          
+          {/* New Colorful Project Icon */}
+          <div className={`relative w-24 h-24 rounded-3xl flex items-center justify-center mb-6 transition-all duration-700 border-2 overflow-hidden shadow-lg ${
+            isConnected 
+              ? 'bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 border-white/20' 
+              : 'bg-slate-100 text-slate-400 border-slate-200 shadow-none'
           }`}>
-            <Power size={48} className={isConnected && devicePower ? 'drop-shadow-sm' : ''} />
+            {/* Animated Glow Effect when connected */}
+            {isConnected && (
+              <div className="absolute inset-0 bg-white/20 animate-pulse mix-blend-overlay"></div>
+            )}
+            <CircuitBoard 
+              size={48} 
+              strokeWidth={1.5} 
+              className={`transition-all duration-500 z-10 ${
+                isConnected ? 'text-white rotate-0' : 'text-slate-300 rotate-12'
+              }`} 
+            />
           </div>
 
-          <h2 className="text-2xl font-bold mb-2">System Status</h2>
+          <h2 className="text-2xl font-bold mb-2 tracking-tight">System Status</h2>
           <p className="text-slate-500 mb-8 max-w-sm text-sm leading-relaxed">
             {!isConnected 
               ? "Dashboard offline. Configure EC2 settings to enable commands." 
               : `Link active. Connected via ${config.protocol.toUpperCase()}.`}
           </p>
 
-          <div className="relative flex items-center gap-4">
+          <div className="flex flex-col items-center gap-6">
             <button
               onClick={togglePower}
               disabled={isPublishing || !isConnected}
@@ -221,13 +228,14 @@ const App = () => {
               {devicePower ? 'Power OFF' : 'Power ON'}
             </button>
 
-            <div className={`absolute left-full ml-4 transition-all duration-500 flex items-center gap-2 whitespace-nowrap ${
-              showSuccess ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-4 pointer-events-none'
+            {/* Success Animation below button */}
+            <div className={`h-8 transition-all duration-500 flex items-center gap-2 ${
+              showSuccess ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-2 pointer-events-none'
             }`}>
-              <div className="bg-emerald-100 text-emerald-600 p-1.5 rounded-full">
-                <CheckCircle2 size={24} />
+              <div className="bg-emerald-100 text-emerald-600 p-1 rounded-full">
+                <CheckCircle2 size={18} />
               </div>
-              <span className="text-emerald-600 font-bold text-sm uppercase tracking-tight">Confirmed by STM32</span>
+              <span className="text-emerald-600 font-bold text-sm uppercase tracking-tight">Sent successfully</span>
             </div>
           </div>
         </div>
