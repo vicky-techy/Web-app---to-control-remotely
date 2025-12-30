@@ -1,344 +1,355 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MQTT Control Panel for STM32</title>
-    <!-- Tailwind CSS for styling -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- MQTT.js client library -->
-    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
-    <style>
-        /* Custom font and minor style adjustments */
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-        body {
-            font-family: 'Inter', sans-serif;
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { 
+  Settings, 
+  Power, 
+  Wifi, 
+  WifiOff, 
+  CheckCircle2, 
+  RefreshCcw,
+  Activity,
+  Send,
+  X,
+  Server,
+  LogOut,
+  AlertCircle,
+  ShieldAlert
+} from 'lucide-react';
+
+// MQTT library from CDN
+const MQTT_URL = "https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js";
+
+const App = () => {
+  const [devicePower, setDevicePower] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  
+  // Form State
+  const [brokerIp, setBrokerIp] = useState('');
+  const [brokerPort, setBrokerPort] = useState('8081'); 
+  const [protocol, setProtocol] = useState(window.location.protocol === 'https:' ? 'wss' : 'ws');
+
+  // MQTT Client State
+  const [client, setClient] = useState(null);
+  const [status, setStatus] = useState('disconnected');
+  const [config, setConfig] = useState(null);
+  const [errorLog, setErrorLog] = useState('');
+
+  // Load MQTT library
+  useEffect(() => {
+    const script = document.createElement('script');
+    script.src = MQTT_URL;
+    script.async = true;
+    script.onload = () => console.log("MQTT Library Loaded");
+    document.body.appendChild(script);
+    return () => {
+      document.body.removeChild(script);
+    };
+  }, []);
+
+  const triggerSuccess = useCallback(() => {
+    setIsPublishing(false);
+    setShowSuccess(true);
+    setTimeout(() => setShowSuccess(false), 2000);
+  }, []);
+
+  const handleConnect = (e) => {
+    e.preventDefault();
+    setErrorLog('');
+    
+    if (!window.mqtt) {
+      setErrorLog('MQTT Library is still loading.');
+      return;
+    }
+
+    if (!brokerIp) {
+      setErrorLog('Please enter the EC2 IP or Public DNS.');
+      return;
+    }
+
+    // MANDATORY SECURITY CHECK for Mixed Content
+    if (window.location.protocol === 'https:' && protocol === 'ws') {
+      setStatus('error');
+      setErrorLog('BROWSER SECURITY BLOCK: HTTPS sites cannot connect to "ws" brokers. Please use "wss" or switch this page to HTTP.');
+      return;
+    }
+
+    // Clean up existing client
+    if (client) {
+      client.end(true);
+    }
+
+    setStatus('connecting');
+    
+    // CONSTRUCTION: Use the same pattern as the successful older version
+    const brokerUrl = `${protocol}://${brokerIp}:${brokerPort}`;
+    
+    try {
+      const options = {
+        keepalive: 60,
+        protocolId: 'MQTT',
+        protocolVersion: 4,
+        clean: true,
+        reconnectPeriod: 1000,
+        connectTimeout: 30 * 1000, // Increased timeout
+        clientId: 'web_client_' + Math.random().toString(16).substring(2, 8)
+      };
+
+      const mqttClient = window.mqtt.connect(brokerUrl, options);
+
+      mqttClient.on('connect', () => {
+        console.log("Connected Successfully");
+        setStatus('connected');
+        setErrorLog('');
+        setConfig({ ip: brokerIp, port: brokerPort, protocol });
+        setIsSettingsOpen(false);
+        mqttClient.subscribe('stm32/status');
+      });
+
+      mqttClient.on('message', (topic, message) => {
+        if (topic === 'stm32/status') {
+          triggerSuccess();
         }
-        .log-entry {
-            border-left-width: 4px;
-        }
-        .log-entry-info { border-color: #3b82f6; }
-        .log-entry-success { border-color: #22c55e; }
-        .log-entry-error { border-color: #ef4444; }
-        .log-entry-message { border-color: #eab308; }
-    </style>
-</head>
-<body class="bg-gray-100 dark:bg-gray-900 text-gray-800 dark:text-gray-200 flex items-center justify-center min-h-screen p-4">
+      });
 
-    <div class="w-full max-w-2xl bg-white dark:bg-gray-800 rounded-2xl shadow-lg p-6 md:p-8 space-y-6">
-        <!-- Header -->
-        <div class="text-center">
-            <h1 class="text-2xl md:text-3xl font-bold text-gray-900 dark:text-white">STM32 MQTT Control Panel</h1>
-            <p class="text-gray-500 dark:text-gray-400 mt-1">Control your device via MQTT</p>
-        </div>
+      mqttClient.on('error', (err) => {
+        console.error('MQTT Connection Error:', err);
+        setStatus('error');
+        setErrorLog(`Link Failed: ${err.message || 'Check IP and EC2 Security Rules'}`);
+        mqttClient.end();
+      });
 
-        <!-- Connection Status -->
-        <div id="status-badge" class="flex items-center justify-center p-3 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 font-semibold transition-colors duration-300">
-            <span id="status-indicator" class="w-3 h-3 rounded-full bg-gray-400 mr-3"></span>
-            <span id="status-text">DISCONNECTED</span>
-        </div>
-
-        <!-- Broker Selection -->
-        <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
-             <h2 class="text-lg font-semibold text-center mb-3">Select Broker</h2>
-             <div id="broker-selection" class="grid grid-cols-2 gap-4">
-                <label>
-                    <input type="radio" name="broker" value="hivemq" class="hidden peer" checked>
-                    <div class="flex items-center justify-center space-x-2 p-3 rounded-lg border-2 cursor-pointer transition-all border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-300 peer-checked:border-indigo-600 dark:peer-checked:border-indigo-500 peer-checked:bg-indigo-50 dark:peer-checked:bg-indigo-800 peer-checked:text-indigo-800 dark:peer-checked:text-indigo-50">
-                        <span class="font-medium">HiveMQ Cloud</span>
-                    </div>
-                </label>
-                <label>
-                    <input type="radio" name="broker" value="mosquitto" class="hidden peer">
-                     <div class="flex items-center justify-center space-x-2 p-3 rounded-lg border-2 cursor-pointer transition-all border-gray-300 dark:border-gray-600 text-gray-800 dark:text-gray-300 peer-checked:border-indigo-600 dark:peer-checked:border-indigo-500 peer-checked:bg-indigo-50 dark:peer-checked:bg-indigo-800 peer-checked:text-indigo-800 dark:peer-checked:text-indigo-50">
-                        <span class="font-medium">Local Mosquitto</span>
-                    </div>
-                </label>
-            </div>
-        </div>
-
-        <!-- Connection Settings -->
-        <div id="hivemq-settings">
-            <label for="cluster-url" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Cluster URL</label>
-            <input type="text" id="cluster-url" value="8509ebde5dbe4d0487ba5e2483b1aba6.s1.eu.hivemq.cloud" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-        </div>
-        <div id="mosquitto-settings" class="hidden space-y-4">
-            <div>
-                <label for="ip-address" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Public IP Address</label>
-                <input type="text" id="ip-address" placeholder="e.g., 52.43.174.60" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-                <p class="text-xs text-gray-500 mt-1 italic">The app automatically converts IP to AWS DNS format.</p>
-            </div>
-            <div>
-                <label for="port" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Secure WebSocket Port</label>
-                <input type="number" id="port" value="8081" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-            </div>
-        </div>
-        <div id="common-settings" class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div>
-                <label for="username" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Username <span class="text-xs">(Optional)</span></label>
-                <input type="text" id="username" placeholder="Your MQTT Username" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-            </div>
-            <div>
-                <label for="password" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Password <span class="text-xs">(Optional)</span></label>
-                <input type="password" id="password" placeholder="Your MQTT Password" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
-            </div>
-        </div>
-        
-        <!-- Connect / Disconnect Buttons -->
-        <div class="flex space-x-4">
-            <button id="connect-btn" class="w-full flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-2 px-4 rounded-lg transition-transform transform hover:scale-105">Connect</button>
-            <button id="disconnect-btn" class="w-full flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-2 px-4 rounded-lg transition-transform transform hover:scale-105" disabled>Disconnect</button>
-        </div>
-
-        <!-- Control Buttons -->
-        <div id="control-panel" class="pt-4 border-t border-gray-200 dark:border-gray-700 hidden">
-            <h2 class="text-lg font-semibold text-center mb-4">LED Controls</h2>
-            <div class="space-y-4">
-                <!-- Red LED Row -->
-                <div class="grid grid-cols-2 gap-4">
-                    <button data-command="red on" class="command-btn bg-red-500 hover:bg-red-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">RED ON</button>
-                    <button data-command="red off" class="command-btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">RED OFF</button>
-                </div>
-                <!-- Green LED Row -->
-                <div class="grid grid-cols-2 gap-4">
-                    <button data-command="green on" class="command-btn bg-green-500 hover:bg-green-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">GREEN ON</button>
-                    <button data-command="green off" class="command-btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">GREEN OFF</button>
-                </div>
-                <!-- Blue LED Row -->
-                <div class="grid grid-cols-2 gap-4">
-                    <button data-command="blue on" class="command-btn bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">BLUE ON</button>
-                    <button data-command="blue off" class="command-btn bg-gray-500 hover:bg-gray-600 text-white font-bold py-3 px-4 rounded-lg shadow-md transition-transform transform hover:scale-105">BLUE OFF</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- Log Area -->
-        <div class="pt-4 border-t border-gray-200 dark:border-gray-700">
-            <h2 class="text-lg font-semibold text-center mb-2">Event Log</h2>
-            <div id="log-area" class="h-48 bg-gray-100 dark:bg-gray-900 rounded-lg p-3 overflow-y-auto space-y-2">
-                <!-- Log entries will be added here -->
-            </div>
-        </div>
-    </div>
-
-    <script>
-        // DOM Elements
-        const clusterUrlInput = document.getElementById('cluster-url');
-        const usernameInput = document.getElementById('username');
-        const passwordInput = document.getElementById('password');
-        const ipAddressInput = document.getElementById('ip-address');
-        const portInput = document.getElementById('port');
-        
-        const connectBtn = document.getElementById('connect-btn');
-        const disconnectBtn = document.getElementById('disconnect-btn');
-        
-        const statusBadge = document.getElementById('status-badge');
-        const statusIndicator = document.getElementById('status-indicator');
-        const statusText = document.getElementById('status-text');
-        
-        const controlPanel = document.getElementById('control-panel');
-        const logArea = document.getElementById('log-area');
-        const commandBtns = document.querySelectorAll('.command-btn');
-
-        const brokerSelection = document.getElementById('broker-selection');
-        const hivemqSettings = document.getElementById('hivemq-settings');
-        const mosquittoSettings = document.getElementById('mosquitto-settings');
-
-        let client = null;
-
-        const MQTT_TOPIC_PUBLISH_CONTROL = "stm32/control";
-        const MQTT_TOPIC_SUBSCRIBE_STATUS = "stm32/status";
-
-        function log(message, type = 'info') {
-            const entry = document.createElement('div');
-            entry.className = `log-entry p-2 rounded-md bg-opacity-20 text-sm`;
-            const typeClassMap = {
-                info: 'log-entry-info bg-blue-100 dark:bg-blue-900 text-blue-800 dark:text-blue-200',
-                success: 'log-entry-success bg-green-100 dark:bg-green-900 text-green-800 dark:text-green-200',
-                error: 'log-entry-error bg-red-100 dark:bg-red-900 text-red-800 dark:text-red-200',
-                message: 'log-entry-message bg-yellow-100 dark:bg-yellow-900 text-yellow-800 dark:text-yellow-200'
-            };
-            entry.classList.add(...typeClassMap[type].split(' '));
-            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-            logArea.appendChild(entry);
-            logArea.scrollTop = logArea.scrollHeight;
-        }
-
-        function updateStatusUI(status) {
-            switch (status) {
-                case 'connected':
-                    statusIndicator.className = 'w-3 h-3 rounded-full bg-green-500 animate-pulse';
-                    statusText.textContent = 'CONNECTED';
-                    statusBadge.className = 'flex items-center justify-center p-3 rounded-lg bg-green-100 dark:bg-green-800 text-green-800 dark:text-green-200 font-semibold';
-                    connectBtn.disabled = true;
-                    disconnectBtn.disabled = false;
-                    controlPanel.style.display = 'block';
-                    break;
-                case 'disconnected':
-                case 'error':
-                    statusIndicator.className = status === 'error' ? 'w-3 h-3 rounded-full bg-red-500' : 'w-3 h-3 rounded-full bg-gray-400';
-                    statusText.textContent = status === 'error' ? 'CONNECTION FAILED' : 'DISCONNECTED';
-                    statusBadge.className = status === 'error' 
-                        ? 'flex items-center justify-center p-3 rounded-lg bg-red-100 dark:bg-red-800 text-red-800 dark:text-red-200 font-semibold'
-                        : 'flex items-center justify-center p-3 rounded-lg bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300 font-semibold';
-                    connectBtn.disabled = false;
-                    disconnectBtn.disabled = true;
-                    controlPanel.style.display = 'none';
-                    break;
-                case 'connecting':
-                    statusIndicator.className = 'w-3 h-3 rounded-full bg-yellow-500 animate-spin';
-                    statusText.textContent = 'CONNECTING...';
-                    statusBadge.className = 'flex items-center justify-center p-3 rounded-lg bg-yellow-100 dark:bg-yellow-800 text-yellow-800 dark:text-yellow-200 font-semibold';
-                    connectBtn.disabled = true;
-                    disconnectBtn.disabled = false;
-                    break;
-            }
-        }
-
-        function connectToBroker() {
-            if (client && (client.connecting || client.connected)) {
-                log('Connection already in progress or established.', 'info');
-                return;
-            }
-
-            const selectedBroker = document.querySelector('input[name="broker"]:checked').value;
-            const username = usernameInput.value.trim();
-            const password = passwordInput.value.trim();
-            let brokerUrl = '';
-
-            const options = {
-                clientId: `webapp_${Math.random().toString(16).substr(2, 8)}`,
-                clean: true,
-                connectTimeout: 4000,
-                reconnectPeriod: 5000 
-            };
-            
-            if (username) options.username = username;
-            if (password) options.password = password;
-
-            if (selectedBroker === 'hivemq') {
-                const clusterUrl = clusterUrlInput.value.trim();
-                if (!clusterUrl || !username || !password) {
-                    log('Cluster URL, Username, and Password are required for HiveMQ.', 'error');
-                    return;
-                }
-                brokerUrl = `wss://${clusterUrl}:8884/mqtt`;
-            } else { // mosquitto
-                let rawIp = ipAddressInput.value.trim();
-                const port = portInput.value.trim();
-                
-                if (!rawIp || !port) {
-                    log('IP Address and Port are required for Mosquitto.', 'error');
-                    return;
-                }
-
-                // Automatic conversion from 52.43.174.60 to ec2-52-43-174-60.us-west-2.compute.amazonaws.com
-                let formattedHost = rawIp;
-                // Check if the input looks like a raw IP (contains dots but not the AWS domain)
-                if (rawIp.includes('.') && !rawIp.toLowerCase().includes('amazonaws.com')) {
-                    const hyphenatedIp = rawIp.replace(/\./g, '-');
-                    formattedHost = `ec2-${hyphenatedIp}.us-west-2.compute.amazonaws.com`;
-                    log(`Formatting IP to: ${formattedHost}`, 'info');
-                }
-
-                brokerUrl = `wss://${formattedHost}:${port}`;
-                options.rejectUnauthorized = false;
-            }
-
-            log(`Attempting to connect to ${brokerUrl}...`, 'info');
-            updateStatusUI('connecting');
-            
-            client = mqtt.connect(brokerUrl, options);
-
-            client.on('connect', () => {
-                log(`Successfully connected to ${selectedBroker}!`, 'success');
-                updateStatusUI('connected');
-                client.subscribe(MQTT_TOPIC_SUBSCRIBE_STATUS, { qos: 0 }, (err) => {
-                    if (!err) {
-                        log(`Subscribed to topic: ${MQTT_TOPIC_SUBSCRIBE_STATUS}`, 'success');
-                    } else {
-                        log(`Subscription failed: ${err.message}`, 'error');
-                    }
-                });
-            });
-
-            client.on('error', (err) => {
-                log(`Connection error. See browser console for details.`, 'error');
-                console.error('MQTT Client Error:', err);
-                if (client) {
-                    client.end(true);
-                    client = null;
-                    updateStatusUI('error');
-                }
-            });
-
-            client.on('reconnect', () => {
-                log('Attempting to reconnect...', 'info');
-                updateStatusUI('connecting');
-            });
-
-            client.on('close', () => {
-                if (client) { 
-                    log('Connection closed unexpectedly.', 'error');
-                    client = null;
-                    updateStatusUI('error');
-                }
-            });
-
-            client.on('message', (topic, message) => {
-                log(`Message received on topic ${topic}: ${message.toString()}`, 'message');
-            });
-        }
-
-        function disconnectFromBroker() {
-            if (client) {
-                log('Disconnecting from broker...', 'info');
-                client.removeAllListeners('close'); 
-                client.end(true, {}, () => {
-                    log('Successfully disconnected.', 'success');
-                    client = null;
-                    updateStatusUI('disconnected');
-                });
-            } else {
-                 updateStatusUI('disconnected');
-            }
-        }
-
-        function publishCommand(command) {
-            if (client && client.connected) {
-                client.publish(MQTT_TOPIC_PUBLISH_CONTROL, command, { qos: 0, retain: false }, (err) => {
-                    if (err) {
-                        log(`Failed to publish command: ${err.message}`, 'error');
-                    } else {
-                        log(`Published command: "${command}" to ${MQTT_TOPIC_PUBLISH_CONTROL}`, 'info');
-                    }
-                });
-            } else {
-                log('Cannot publish. Client is not connected.', 'error');
-            }
-        }
-        
-        function handleBrokerSwitch(e) {
-            const selectedValue = e.target.value;
-            hivemqSettings.style.display = selectedValue === 'hivemq' ? 'block' : 'none';
-            mosquittoSettings.style.display = selectedValue === 'mosquitto' ? 'block' : 'none';
-        }
-
-        connectBtn.addEventListener('click', connectToBroker);
-        disconnectBtn.addEventListener('click', disconnectFromBroker);
-        brokerSelection.addEventListener('change', handleBrokerSwitch);
-
-        commandBtns.forEach(btn => {
-            btn.addEventListener('click', () => {
-                const command = btn.getAttribute('data-command');
-                publishCommand(command);
-            });
+      mqttClient.on('close', () => {
+        setStatus((prev) => {
+          if (prev === 'connecting') {
+            setErrorLog('Connection closed. Verify Port 8081 and "protocol websockets" in mosquitto.conf');
+            return 'error';
+          }
+          return prev === 'connected' ? 'disconnected' : prev;
         });
-        
-        handleBrokerSwitch({ target: { value: 'hivemq' } }); 
-        updateStatusUI('disconnected');
-        log('App initialized. Select your broker, enter credentials, and connect.');
+      });
 
-    </script>
-</body>
-</html>
+      setClient(mqttClient);
+    } catch (err) {
+      console.error('System Exception:', err);
+      setStatus('error');
+      setErrorLog(`System Error: ${err.message}`);
+    }
+  };
+
+  const disconnect = () => {
+    if (client) {
+      client.end();
+      setClient(null);
+      setStatus('disconnected');
+      setConfig(null);
+    }
+  };
+
+  const togglePower = () => {
+    if (status !== 'connected' || !client) return;
+    const newState = !devicePower;
+    const message = newState ? "ON" : "OFF";
+    setIsPublishing(true);
+    setDevicePower(newState);
+    
+    // Use QOS 1 for guaranteed delivery
+    client.publish("stm32/control", message, { qos: 1 });
+  };
+
+  const isConnected = status === 'connected';
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 font-sans p-4 md:p-8 flex flex-col items-center">
+      {/* Header */}
+      <header className="w-full max-w-2xl flex justify-between items-center mb-8 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+        <div className="flex items-center gap-3">
+          <div className="bg-blue-600 p-2 rounded-lg text-white">
+            <Activity size={24} />
+          </div>
+          <div>
+            <h1 className="font-bold text-xl tracking-tight">STM32 Control</h1>
+            <p className="text-xs text-slate-500 uppercase tracking-widest font-semibold">
+              {isConnected ? `EC2: ${config.ip}` : 'Industrial Interface'}
+            </p>
+          </div>
+        </div>
+        
+        <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors duration-500 ${
+          isConnected ? 'bg-emerald-50 text-emerald-700 border-emerald-100' : 
+          status === 'connecting' ? 'bg-blue-50 text-blue-700 border-blue-100' :
+          status === 'error' ? 'bg-red-50 text-red-700 border-red-100' :
+          'bg-slate-50 text-slate-500 border-slate-200'
+        }`}>
+          {isConnected ? <Wifi size={14} /> : <WifiOff size={14} />}
+          {status.toUpperCase()}
+        </div>
+      </header>
+
+      {/* Main Control Card */}
+      <main className="w-full max-w-2xl bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden relative">
+        <div className="p-8 md:p-12 flex flex-col items-center text-center">
+          <div className={`w-24 h-24 rounded-full flex items-center justify-center mb-6 transition-all duration-500 ${
+            isConnected && devicePower ? 'bg-blue-100 text-blue-600 shadow-inner' : 
+            isConnected ? 'bg-slate-100 text-slate-400' : 'bg-slate-50 text-slate-300'
+          }`}>
+            <Power size={48} className={isConnected && devicePower ? 'drop-shadow-sm' : ''} />
+          </div>
+
+          <h2 className="text-2xl font-bold mb-2">System Status</h2>
+          <p className="text-slate-500 mb-8 max-w-sm text-sm leading-relaxed">
+            {!isConnected 
+              ? "Dashboard offline. Configure EC2 settings to enable commands." 
+              : `Link active. Connected via ${config.protocol.toUpperCase()}.`}
+          </p>
+
+          <div className="relative flex items-center gap-4">
+            <button
+              onClick={togglePower}
+              disabled={isPublishing || !isConnected}
+              className={`group relative flex items-center gap-3 px-10 py-4 rounded-2xl font-bold text-lg transition-all active:scale-95 disabled:opacity-30 disabled:grayscale disabled:cursor-not-allowed ${
+                devicePower 
+                  ? 'bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-200' 
+                  : 'bg-blue-600 hover:bg-blue-700 text-white shadow-lg shadow-blue-200'
+              }`}
+            >
+              {isPublishing ? (
+                <RefreshCcw className="animate-spin" size={20} />
+              ) : (
+                <Send size={20} className="group-hover:translate-x-1 group-hover:-translate-y-1 transition-transform" />
+              )}
+              {devicePower ? 'Power OFF' : 'Power ON'}
+            </button>
+
+            <div className={`absolute left-full ml-4 transition-all duration-500 flex items-center gap-2 whitespace-nowrap ${
+              showSuccess ? 'opacity-100 translate-x-0' : 'opacity-0 -translate-x-4 pointer-events-none'
+            }`}>
+              <div className="bg-emerald-100 text-emerald-600 p-1.5 rounded-full">
+                <CheckCircle2 size={24} />
+              </div>
+              <span className="text-emerald-600 font-bold text-sm uppercase tracking-tight">Confirmed by STM32</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-slate-50 border-t border-slate-200 p-6 grid grid-cols-2 gap-4">
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <span className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Status Topic</span>
+            <code className="text-xs font-mono text-blue-600">stm32/status</code>
+          </div>
+          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+            <span className="block text-[10px] text-slate-400 font-bold uppercase mb-1">Control Topic</span>
+            <code className="text-xs font-mono text-slate-700">stm32/control</code>
+          </div>
+        </div>
+      </main>
+
+      {/* Footer Actions */}
+      <div className="mt-8 flex gap-4">
+        <button 
+          onClick={() => setIsSettingsOpen(true)}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all font-semibold text-sm shadow-sm"
+        >
+          <Settings size={18} />
+          Settings
+        </button>
+
+        {isConnected && (
+          <button 
+            onClick={disconnect}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-red-50 text-red-600 border border-red-100 hover:bg-red-100 transition-all font-semibold text-sm shadow-sm"
+          >
+            <LogOut size={18} />
+            Disconnect
+          </button>
+        )}
+      </div>
+
+      {/* Settings Modal */}
+      {isSettingsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-200 overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <div className="flex items-center gap-2">
+                <Server size={20} className="text-blue-600" />
+                <h3 className="font-bold text-lg text-slate-800">Broker Configuration</h3>
+              </div>
+              <button onClick={() => setIsSettingsOpen(false)} className="text-slate-400 hover:text-slate-600">
+                <X size={20} />
+              </button>
+            </div>
+            
+            <form onSubmit={handleConnect} className="p-6 space-y-4">
+              {errorLog && (
+                <div className="p-3 bg-red-50 border border-red-100 rounded-xl flex items-start gap-2 text-red-600 text-[11px] leading-relaxed">
+                  <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                  <span>{errorLog}</span>
+                </div>
+              )}
+
+              {window.location.protocol === 'https:' && protocol === 'ws' && (
+                <div className="p-3 bg-amber-50 border border-amber-100 rounded-xl flex items-start gap-2 text-amber-700 text-[10px]">
+                  <ShieldAlert size={16} className="shrink-0" />
+                  <p><strong>Security Note:</strong> This site is HTTPS. Browsers block <strong>WS</strong>. You must use <strong>WSS</strong> or an HTTP version of the app to connect via IP.</p>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5 ml-1">EC2 IP or Public DNS</label>
+                <input 
+                  type="text" 
+                  placeholder="e.g. 52.43.174.60 or ec2-xx.compute.amazonaws.com"
+                  className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-500 outline-none transition-all placeholder:text-slate-300"
+                  value={brokerIp}
+                  onChange={(e) => setBrokerIp(e.target.value)}
+                  required
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5 ml-1">Protocol</label>
+                  <select 
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none cursor-pointer"
+                    value={protocol}
+                    onChange={(e) => setProtocol(e.target.value)}
+                  >
+                    <option value="ws">WS (Unsecured)</option>
+                    <option value="wss">WSS (Secured)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-400 uppercase mb-1.5 ml-1">Port</label>
+                  <input 
+                    type="text" 
+                    placeholder="8081"
+                    className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none"
+                    value={brokerPort}
+                    onChange={(e) => setBrokerPort(e.target.value)}
+                  />
+                </div>
+              </div>
+
+              <button 
+                type="submit"
+                disabled={status === 'connecting'}
+                className="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-400 text-white rounded-2xl font-bold mt-2 shadow-lg transition-all flex items-center justify-center gap-2"
+              >
+                {status === 'connecting' ? <RefreshCcw size={20} className="animate-spin" /> : null}
+                {status === 'connecting' ? 'Connecting to Broker...' : 'Connect to EC2'}
+              </button>
+
+              <div className="pt-2 text-center">
+                <p className="text-[10px] text-slate-400 leading-relaxed italic">
+                  Tip: Ensure EC2 Inbound Rules allow TCP traffic on Port {brokerPort}.
+                </p>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default App;
