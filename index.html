@@ -155,6 +155,8 @@
                 
                 // Automatically handle transformation if raw IP is provided
                 const targetHost = getFormattedHost(brokerIp);
+                
+                // Ensure protocol matches the connection string format
                 const brokerUrl = `${protocol}://${targetHost}:${brokerPort}`;
                 
                 try {
@@ -164,8 +166,9 @@
                         protocolVersion: 4,
                         clean: true,
                         reconnectPeriod: 1000,
-                        connectTimeout: 20 * 1000,
-                        clientId: 'web_' + Math.random().toString(16).substring(2, 8)
+                        connectTimeout: 30 * 1000, // Longer timeout for mobile networks
+                        clientId: 'web_' + Math.random().toString(16).substring(2, 8),
+                        path: '/mqtt' // Common requirement for Mosquitto WebSockets on mobile
                     };
 
                     const mqttClient = window.mqtt.connect(brokerUrl, options);
@@ -191,7 +194,7 @@
                     mqttClient.on('close', () => {
                         setStatus(prev => {
                             if (prev === 'connecting') {
-                                setErrorLog('Connection failed. Ensure Port allows WSS traffic and DNS is correct.');
+                                setErrorLog('Connection failed. Ensure Port allows WSS traffic and SSL is valid.');
                                 return 'error';
                             }
                             return prev === 'connected' ? 'disconnected' : prev;
@@ -215,7 +218,7 @@
 
             return (
                 <div className="min-h-screen p-4 md:p-8 flex flex-col items-center">
-                    <header className="w-full max-w-2xl flex justify-between items-center mb-8 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+                    <header className="w-full max-w-2xl flex justify-between items-center mb-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
                         <div className="flex items-center gap-3">
                             <div className="bg-blue-600 p-2 rounded-lg text-white">
                                 <Icon name="activity" />
@@ -238,24 +241,24 @@
                     </header>
 
                     <main className="w-full max-w-2xl bg-white rounded-[2rem] shadow-2xl border border-slate-200 overflow-hidden relative">
-                        <div className="p-10 md:p-14 flex flex-col items-center text-center">
+                        <div className="p-6 md:p-10 flex flex-col items-center text-center">
                             
                             {/* Controller (Circuit) Icon */}
-                            <div className={`relative w-24 h-24 rounded-3xl flex items-center justify-center mb-8 transition-all duration-700 border-2 overflow-hidden shadow-xl ${
+                            <div className={`relative w-24 h-24 rounded-3xl flex items-center justify-center mb-4 transition-all duration-700 border-2 overflow-hidden shadow-xl ${
                                 status === 'connected' ? 'bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 border-white/20' : 'bg-slate-100 text-slate-400 border-slate-200 shadow-none'
                             }`}>
                                 {status === 'connected' && <div className="absolute inset-0 bg-white/20 animate-pulse-glow mix-blend-overlay"></div>}
                                 <Icon name="circuit" size={50} className={`z-10 transition-transform duration-500 ${status === 'connected' ? 'text-white scale-110' : 'text-slate-300 rotate-12'}`} />
                             </div>
 
-                            <h2 className="text-2xl font-bold mb-3 text-slate-800 tracking-tight">System Status</h2>
-                            <p className="text-slate-500 mb-10 max-w-sm text-sm leading-relaxed italic">
+                            <h2 className="text-2xl font-bold mb-1 text-slate-800 tracking-tight">System Status</h2>
+                            <p className="text-slate-500 mb-6 max-w-sm text-sm leading-relaxed italic">
                                 {status !== 'connected' ? "Establish a secure WSS link via settings to start controlling the STM32 controller." : "Controller is active and listening for commands."}
                             </p>
 
-                            <div className="flex flex-col items-center gap-6 w-full">
+                            <div className="flex flex-col items-center gap-4 w-full">
                                 <button onClick={togglePower} disabled={isPublishing || status !== 'connected'} 
-                                    className={`group relative flex items-center gap-3 px-10 py-4 rounded-2xl font-bold text-lg transition-all active:scale-95 disabled:opacity-20 disabled:grayscale ${
+                                    className={`group relative flex items-center justify-center gap-3 px-10 py-4 rounded-2xl font-bold text-lg transition-all active:scale-95 disabled:opacity-20 disabled:grayscale ${
                                     devicePower ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-xl shadow-rose-200' : 'bg-blue-600 hover:bg-blue-700 text-white shadow-xl shadow-blue-200'
                                 }`}>
                                     {isPublishing ? <Icon name="refresh" className="animate-spin" size={20} /> : <Icon name="send" size={20} className="transition-transform group-hover:translate-x-1" />}
@@ -268,20 +271,9 @@
                                 </div>
                             </div>
                         </div>
-
-                        <div className="bg-slate-50/80 backdrop-blur-sm border-t border-slate-200 p-8 grid grid-cols-2 gap-6">
-                            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm transition-transform hover:-translate-y-1">
-                                <span className="block text-[10px] text-slate-400 font-bold uppercase mb-2 tracking-widest text-center">Status Topic</span>
-                                <code className="text-[11px] font-mono text-blue-600 block bg-blue-50/50 py-1 px-2 rounded-md truncate text-center">stm32/status</code>
-                            </div>
-                            <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm transition-transform hover:-translate-y-1">
-                                <span className="block text-[10px] text-slate-400 font-bold uppercase mb-2 tracking-widest text-center">Control Topic</span>
-                                <code className="text-[11px] font-mono text-slate-700 block bg-slate-100/50 py-1 px-2 rounded-md truncate text-center">stm32/control</code>
-                            </div>
-                        </div>
                     </main>
 
-                    <div className="mt-10 flex gap-4">
+                    <div className="mt-6 flex gap-4">
                         <button onClick={() => setIsSettingsOpen(true)} className="flex items-center gap-2 px-6 py-3 rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all font-bold text-sm shadow-sm ring-1 ring-slate-100">
                             <Icon name="settings" size={18} />
                             Settings
@@ -341,8 +333,8 @@
                                             {status === 'connecting' ? <Icon name="refresh" className="animate-spin" /> : <Icon name="server" size={20} />}
                                             {status === 'connecting' ? 'Linking...' : 'Establish Connection'}
                                         </button>
-                                        <p className="text-[10px] text-slate-400 text-center mt-4 font-bold italic uppercase tracking-wider">
-                                            {isSecureOrigin ? "WSS Link Required" : "Secure Link Preferred"}
+                                        <p className="text-[10px] text-slate-400 text-center mt-4 font-bold italic uppercase tracking-wider leading-relaxed">
+                                            {isSecureOrigin ? "Note: Secure WSS required for mobile browsers over HTTPS." : "WSS recommended for stable mobile links."}
                                         </p>
                                     </div>
                                 </form>
