@@ -64,8 +64,9 @@
         </div>
         <div id="mosquitto-settings" class="hidden space-y-4">
             <div>
-                <label for="ip-address" class="block text-sm font-medium text-gray-700 dark:text-gray-300">IP Address / Domain</label>
-                <input type="text" id="ip-address" placeholder="e.g., ec2-....com" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                <label for="ip-address" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Public IP Address</label>
+                <input type="text" id="ip-address" placeholder="e.g., 52.43.174.60" class="mt-1 block w-full px-3 py-2 bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm placeholder-gray-400 focus:outline-none focus:ring-indigo-500 focus:border-indigo-500">
+                <p class="text-xs text-gray-500 mt-1 italic">The app automatically converts IP to AWS DNS format.</p>
             </div>
             <div>
                 <label for="port" class="block text-sm font-medium text-gray-700 dark:text-gray-300">Secure WebSocket Port</label>
@@ -145,15 +146,9 @@
 
         let client = null;
 
-        // Topics from your STM32 configuration
         const MQTT_TOPIC_PUBLISH_CONTROL = "stm32/control";
         const MQTT_TOPIC_SUBSCRIBE_STATUS = "stm32/status";
 
-        /**
-         * Adds a new entry to the log area with appropriate styling.
-         * @param {string} message - The message to log.
-         * @param {string} type - The type of log (info, success, error, message).
-         */
         function log(message, type = 'info') {
             const entry = document.createElement('div');
             entry.className = `log-entry p-2 rounded-md bg-opacity-20 text-sm`;
@@ -166,13 +161,9 @@
             entry.classList.add(...typeClassMap[type].split(' '));
             entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
             logArea.appendChild(entry);
-            logArea.scrollTop = logArea.scrollHeight; // Auto-scroll to bottom
+            logArea.scrollTop = logArea.scrollHeight;
         }
 
-        /**
-         * Updates the UI to reflect the current connection status.
-         * @param {string} status - The connection status ('connected', 'disconnected', 'connecting', 'error').
-         */
         function updateStatusUI(status) {
             switch (status) {
                 case 'connected':
@@ -204,9 +195,6 @@
             }
         }
 
-        /**
-         * Handles the connection logic to the MQTT broker.
-         */
         function connectToBroker() {
             if (client && (client.connecting || client.connected)) {
                 log('Connection already in progress or established.', 'info');
@@ -236,13 +224,24 @@
                 }
                 brokerUrl = `wss://${clusterUrl}:8884/mqtt`;
             } else { // mosquitto
-                const ipAddress = ipAddressInput.value.trim();
+                let rawIp = ipAddressInput.value.trim();
                 const port = portInput.value.trim();
-                if (!ipAddress || !port) {
+                
+                if (!rawIp || !port) {
                     log('IP Address and Port are required for Mosquitto.', 'error');
                     return;
                 }
-                brokerUrl = `wss://${ipAddress}:${port}`;
+
+                // Automatic conversion from 52.43.174.60 to ec2-52-43-174-60.us-west-2.compute.amazonaws.com
+                let formattedHost = rawIp;
+                // Check if the input looks like a raw IP (contains dots but not the AWS domain)
+                if (rawIp.includes('.') && !rawIp.toLowerCase().includes('amazonaws.com')) {
+                    const hyphenatedIp = rawIp.replace(/\./g, '-');
+                    formattedHost = `ec2-${hyphenatedIp}.us-west-2.compute.amazonaws.com`;
+                    log(`Formatting IP to: ${formattedHost}`, 'info');
+                }
+
+                brokerUrl = `wss://${formattedHost}:${port}`;
                 options.rejectUnauthorized = false;
             }
 
@@ -251,7 +250,6 @@
             
             client = mqtt.connect(brokerUrl, options);
 
-            // --- MQTT Client Event Handlers ---
             client.on('connect', () => {
                 log(`Successfully connected to ${selectedBroker}!`, 'success');
                 updateStatusUI('connected');
@@ -268,7 +266,7 @@
                 log(`Connection error. See browser console for details.`, 'error');
                 console.error('MQTT Client Error:', err);
                 if (client) {
-                    client.end(true); // Force close on error
+                    client.end(true);
                     client = null;
                     updateStatusUI('error');
                 }
@@ -280,11 +278,9 @@
             });
 
             client.on('close', () => {
-                // This event fires after disconnect or on connection failure.
-                // We only want to show an error if it wasn't a user-initiated disconnect.
                 if (client) { 
                     log('Connection closed unexpectedly.', 'error');
-                    client = null; // Clear the client to allow a new connection attempt
+                    client = null;
                     updateStatusUI('error');
                 }
             });
@@ -294,13 +290,9 @@
             });
         }
 
-        /**
-         * Disconnects from the MQTT broker forcefully.
-         */
         function disconnectFromBroker() {
             if (client) {
                 log('Disconnecting from broker...', 'info');
-                // Temporarily remove the 'close' listener to prevent it from firing as an error
                 client.removeAllListeners('close'); 
                 client.end(true, {}, () => {
                     log('Successfully disconnected.', 'success');
@@ -312,9 +304,6 @@
             }
         }
 
-        /**
-         * Publishes a message to the control topic.
-         */
         function publishCommand(command) {
             if (client && client.connected) {
                 client.publish(MQTT_TOPIC_PUBLISH_CONTROL, command, { qos: 0, retain: false }, (err) => {
@@ -329,16 +318,12 @@
             }
         }
         
-        /**
-         * Handles switching the UI between broker types.
-         */
         function handleBrokerSwitch(e) {
             const selectedValue = e.target.value;
             hivemqSettings.style.display = selectedValue === 'hivemq' ? 'block' : 'none';
             mosquittoSettings.style.display = selectedValue === 'mosquitto' ? 'block' : 'none';
         }
 
-        // --- Event Listeners ---
         connectBtn.addEventListener('click', connectToBroker);
         disconnectBtn.addEventListener('click', disconnectFromBroker);
         brokerSelection.addEventListener('change', handleBrokerSwitch);
@@ -350,12 +335,10 @@
             });
         });
         
-        // --- Initialize UI ---
-        handleBrokerSwitch({ target: { value: 'hivemq' } }); // Set initial state
+        handleBrokerSwitch({ target: { value: 'hivemq' } }); 
         updateStatusUI('disconnected');
         log('App initialized. Select your broker, enter credentials, and connect.');
 
     </script>
 </body>
 </html>
-
