@@ -113,11 +113,20 @@
             const [errorLog, setErrorLog] = useState('');
 
             const triggerSuccess = useCallback((receivedValue) => {
-                setIsPublishing(false);
+                // 1. Show the 3D animation first
                 setConfirmedState(receivedValue);
                 setShowSuccess(true);
-                // Reduced delay to 3 seconds for a snappier UI
-                setTimeout(() => setShowSuccess(false), 3000);
+                
+                // 2. WAIT for the plug animation to physically complete (~1.2 seconds)
+                // before updating the button text and color
+                setTimeout(() => {
+                    if (receivedValue === 'ON') setDevicePower(true);
+                    if (receivedValue === 'OFF') setDevicePower(false);
+                    setIsPublishing(false);
+                },1000);
+                
+                // 3. Hide the entire feedback block after a total of 4 seconds
+                setTimeout(() => setShowSuccess(false),3000);
             }, []);
 
             const getFormattedHost = (input) => {
@@ -189,10 +198,11 @@
 
             const togglePower = () => {
                 if (status !== 'connected' || !client) return;
-                const newState = !devicePower;
                 setIsPublishing(true);
-                setDevicePower(newState);
-                client.publish("stm32/control", newState ? "ON" : "OFF", { qos: 1 });
+                
+                // We no longer update setDevicePower immediately here.
+                // We wait for the hardware to confirm via triggerSuccess.
+                client.publish("stm32/control", !devicePower ? "ON" : "OFF", { qos: 1 });
             };
 
             return (
@@ -241,7 +251,7 @@
                                 }`}>
                                     {isPublishing ? <Icon name="refresh" className="animate-spin" size={20} /> : <Icon name="send" size={20} className="transition-transform group-hover:translate-x-1" />}
                                     {isPublishing 
-                                        ? (devicePower ? 'POWERING ON' : 'POWERING OFF') 
+                                        ? (!devicePower ? 'POWERING ON' : 'POWERING OFF') 
                                         : (devicePower ? 'POWER OFF' : 'POWER ON')
                                     }
                                 </button>
