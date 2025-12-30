@@ -102,7 +102,7 @@
             const [isSettingsOpen, setIsSettingsOpen] = useState(false);
             
             const isSecureOrigin = window.location.protocol === 'https:';
-            const [brokerIp, setBrokerIp] = useState('');
+            const [brokerIp, setBrokerIp] = useState('52.43.174.60');
             const [brokerPort, setBrokerPort] = useState('8081'); 
             const [protocol, setProtocol] = useState('wss'); 
             const [awsRegion, setAwsRegion] = useState('us-west-2');
@@ -202,7 +202,7 @@
                 
                 // We no longer update setDevicePower immediately here.
                 // We wait for the hardware to confirm via triggerSuccess.
-                client.publish("stm32/control", !devicePower ? "ON" : "OFF", { qos: 1 });
+                client.publish("stm32/control", !devicePower ? "blue on" : "blue off", { qos: 1 });
             };
 
             return (
@@ -390,4 +390,5 @@
     </script>
 </body>
 </html>
+
 
