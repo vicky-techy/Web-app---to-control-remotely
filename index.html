@@ -86,6 +86,7 @@
                 refresh: <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M3 21v-5h5" />,
                 wifi: <path d="M5 13a10 10 0 0 1 14 0M8.5 16.5a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 20 0M12 20h.01" />,
                 wifiOff: <path d="m2 2 20 20M8.5 16.5a5 5 0 0 1 7 0M12 20h.01M5.74 10.3c.43-.37.89-.72 1.38-1.04M19.07 13c-.43-.37-.89-.72-1.38-1.04M16.8 7a15 15 0 0 0-7.3-1.6M12 20h.01" />,
+                rocket: <path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09zM12 15l-3-3m4-3l-3-3m11 2c.46-1.92-.1-4.14-1.52-5.56S16.03.95 14.11 1.41l-2.04 4.08-3.07 3.07-4.08 2.04c-.3.15-.3.62 0 .77l3.07 3.07 3.07 3.07.77 0 2.04-4.08 3.07-3.07 4.08-2.04z" />
             };
             return (
                 <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -118,16 +119,24 @@
             const [config, setConfig] = useState(null);
             const [errorLog, setErrorLog] = useState('');
 
+            // Refs to manage pending cleanup of animation and state logic
+            const animationTimeoutRef = useRef(null);
+            const hideTimeoutRef = useRef(null);
+
             // Abort pending logic and cleanup
             const abortPendingProcesses = useCallback(() => {
                 if (retryTimeoutRef.current) {
                     clearTimeout(retryTimeoutRef.current);
                     retryTimeoutRef.current = null;
                 }
+                if (animationTimeoutRef.current) clearTimeout(animationTimeoutRef.current);
+                if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+                
                 retryCountRef.current = 0;
                 setIsPublishing(false);
                 setRetryFailed(false);
                 pendingActionRef.current = null;
+                // Note: confirmedState is intentionally NOT cleared here to support physical motion starting from the current state
             }, []);
 
             const handleDisconnect = useCallback(() => {
@@ -149,18 +158,29 @@
                 retryCountRef.current = 0;
                 setRetryFailed(false);
 
-                setConfirmedState(receivedValue);
-                setShowSuccess(true);
+                const isCurrentlyON = receivedValue === 'ON' || receivedValue.toLowerCase().includes('on');
                 
-                // Wait for the 3D plug animation to visually complete (~1s) before updating UI state
-                setTimeout(() => {
-                    if (receivedValue === 'ON' || receivedValue.toLowerCase().includes('on')) setDevicePower(true);
-                    if (receivedValue === 'OFF' || receivedValue.toLowerCase().includes('off')) setDevicePower(false);
+                // Sequence logic to ensure smooth physical sliding motion
+                if (isCurrentlyON) {
+                    // Moving from disconnected to connected
+                    setConfirmedState('OFF'); 
+                    setShowSuccess(true);
+                    setTimeout(() => setConfirmedState('ON'), 50);
+                } else {
+                    // Moving from connected to disconnected
+                    setConfirmedState('ON'); 
+                    setShowSuccess(true);
+                    setTimeout(() => setConfirmedState('OFF'), 50);
+                }
+                
+                // Wait for the 3D plug animation to visually complete (~1s) before updating UI button state
+                animationTimeoutRef.current = setTimeout(() => {
+                    setDevicePower(isCurrentlyON);
                     setIsPublishing(false);
                 }, 1000);
                 
-                setTimeout(() => setShowSuccess(false), 3000);
-            }, []);
+                hideTimeoutRef.current = setTimeout(() => setShowSuccess(false), 3000);
+            }, [devicePower]);
 
             const getFormattedHost = (input) => {
                 const ipRegex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
@@ -179,10 +199,9 @@
                 retryTimeoutRef.current = setTimeout(() => {
                     if (retryCountRef.current < 2) {
                         retryCountRef.current += 1;
-                        console.log(`Retry attempt #${retryCountRef.current} for ${action}`);
                         sendMQTTCommand(action); 
                     } else {
-                        // All 3 attempts failed
+                        // All attempts failed
                         setIsPublishing(false);
                         setRetryFailed(true);
                         retryCountRef.current = 0;
@@ -190,11 +209,10 @@
                 }, 10000);
             }, [client]);
 
-            const handleConnect = (e) => {
-                e.preventDefault();
+            const startConnection = (ip, port, prot) => {
                 setErrorLog('');
                 if (!window.mqtt) return;
-                if (isSecureOrigin && protocol === 'ws') {
+                if (isSecureOrigin && prot === 'ws') {
                     setStatus('error');
                     setErrorLog('BROWSER SECURITY ERROR: GitHub Pages (HTTPS) cannot connect to unsecured "ws" brokers. Please use "wss".');
                     return;
@@ -203,8 +221,8 @@
                 if (client) handleDisconnect();
 
                 setStatus('connecting');
-                const targetHost = getFormattedHost(brokerIp);
-                const brokerUrl = `${protocol}://${targetHost}:${brokerPort}`;
+                const targetHost = getFormattedHost(ip);
+                const brokerUrl = `${prot}://${targetHost}:${port}`;
                 try {
                     const options = {
                         keepalive: 60,
@@ -220,7 +238,7 @@
                     mqttClient.on('connect', () => {
                         setStatus('connected');
                         setErrorLog('');
-                        setConfig({ ip: targetHost, port: brokerPort, protocol });
+                        setConfig({ ip: targetHost, port: port, protocol: prot });
                         setIsSettingsOpen(false);
                         mqttClient.subscribe('stm32/status');
                     });
@@ -250,8 +268,24 @@
                 }
             };
 
+            const handleConnect = (e) => {
+                e.preventDefault();
+                startConnection(brokerIp, brokerPort, protocol);
+            };
+
+            const handleDefaultConnect = () => {
+                const defaultIp = '52.43.174.60';
+                setBrokerIp(defaultIp);
+                setBrokerPort('8081');
+                setProtocol('wss');
+                startConnection(defaultIp, '8081', 'wss');
+            };
+
             const togglePower = () => {
                 if (status !== 'connected' || !client) return;
+                
+                abortPendingProcesses();
+                setShowSuccess(false);
                 
                 setIsPublishing(true);
                 setRetryFailed(false);
@@ -322,42 +356,33 @@
                                     {getButtonText()}
                                 </button>
 
-                                {/* High-End 3D Connection Animation (Inserting Effect) */}
+                                {/* 3D Connection Animation */}
                                 <div className={`h-24 flex flex-col items-center justify-center transition-all duration-700 perspective-container ${showSuccess ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4 pointer-events-none'}`}>
                                     <div className="relative flex items-center justify-center w-52 h-16">
                                         
-                                        {/* 3D Wall Socket with "Entry" depth */}
                                         <div className="absolute left-6 w-14 h-14 bg-slate-200 rounded-xl socket-3d border-r-4 border-slate-300 z-10 flex items-center justify-center overflow-hidden">
-                                            {/* Hollow Recess Plate */}
                                             <div className="w-10 h-10 bg-slate-800 rounded-lg shadow-[inset_4px_4px_10px_rgba(0,0,0,0.8)] flex flex-row items-center justify-center gap-2.5">
-                                                {/* These are the slots prongs go INTO - NOW GLOWING GREEN */}
                                                 <div className={`w-1.5 h-6 rounded-full transition-all duration-700 ${confirmedState === 'ON' ? 'bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,1)]' : 'bg-slate-950/50'}`}></div>
                                                 <div className={`w-1.5 h-6 rounded-full transition-all duration-700 ${confirmedState === 'ON' ? 'bg-emerald-400 shadow-[0_0_12px_rgba(52,211,153,1)]' : 'bg-slate-950/50'}`}></div>
                                             </div>
                                         </div>
 
-                                        {/* link Glow */}
                                         <div className={`absolute left-18 h-1 transition-all duration-1000 ease-in-out ${confirmedState === 'ON' ? 'w-14 bg-emerald-400 shadow-[0_0_15px_rgba(52,211,153,1)]' : 'w-0 bg-transparent'}`} />
 
-                                        {/* 3D Plug Component - Now Z-ordered to feel inserted */}
                                         <div className={`absolute transition-all duration-700 ease-in-out transform flex items-center z-20 ${confirmedState === 'ON' ? 'translate-x-[2px]' : 'translate-x-[50px]'}`}>
                                             <div className="relative flex items-center group">
-                                                {/* Metal Prongs - Move deeper into slots and vanish */}
                                                 <div className="flex flex-col gap-3 mr-[-2px]">
                                                     <div className={`w-5 h-1.5 bg-gradient-to-r from-amber-200 to-amber-500 rounded-l-sm transition-all duration-700 ${confirmedState === 'ON' ? 'translate-x-[-15px] opacity-0 scale-x-0' : 'translate-x-0 opacity-100 scale-x-100'}`}></div>
                                                     <div className={`w-5 h-1.5 bg-gradient-to-r from-amber-200 to-amber-500 rounded-l-sm transition-all duration-700 ${confirmedState === 'ON' ? 'translate-x-[-15px] opacity-0 scale-x-0' : 'translate-x-0 opacity-100 scale-x-100'}`}></div>
                                                 </div>
                                                 
-                                                {/* Plug Body - Stops at socket face */}
-                                                <div className="w-12 h-10 bg-gradient-to-br from-slate-600 to-slate-800 rounded-lg border-l-2 border-slate-500 plug-3d relative flex flex-col items-center justify-center shadow-lg">
+                                                <div className="w-12 h-9 bg-gradient-to-br from-slate-600 to-slate-800 rounded-lg border-l-2 border-slate-500 plug-3d relative flex flex-col items-center justify-center shadow-lg">
                                                     <div className="absolute top-1 left-1 w-full h-1/3 bg-white/5 rounded-t-lg"></div>
                                                     <div className="w-6 h-0.5 bg-slate-900/40 rounded-full"></div>
                                                 </div>
 
-                                                {/* Power Cord */}
-                                                <div className={`w-16 h-2 bg-gradient-to-b from-slate-700 to-slate-900 rounded-r-full transition-all duration-700 ${confirmedState === 'ON' ? 'ring-1 ring-emerald-500/20' : ''}`}></div>
+                                                <div className={`w-16 h-2 bg-gradient-to-b from-slate-700 to-slate-900 rounded-r-full shadow-md transition-all duration-700 ${confirmedState === 'ON' ? 'ring-1 ring-emerald-500/20' : ''}`}></div>
                                                 
-                                                {/* Spark effect at insertion point */}
                                                 {showSuccess && confirmedState === 'ON' && (
                                                     <div className="absolute left-[-5px] top-1/2 -translate-y-1/2 w-4 h-4 bg-yellow-300 rounded-full animate-spark blur-[1px]"></div>
                                                 )}
@@ -376,11 +401,19 @@
                         </div>
                     </main>
 
-                    <div className="mt-6 flex gap-4">
+                    <div className="mt-6 flex flex-wrap justify-center gap-4">
                         <button onClick={() => setIsSettingsOpen(true)} className="flex items-center gap-2 px-6 py-3 rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all font-bold text-sm shadow-sm ring-1 ring-slate-100">
                             <Icon name="settings" size={18} />
                             Settings
                         </button>
+
+                        {(status === 'disconnected' || status === 'error') && (
+                            <button onClick={handleDefaultConnect} className="flex items-center gap-2 px-6 py-3 rounded-full bg-blue-50 text-blue-600 border border-blue-100 hover:bg-blue-100 transition-all font-bold text-sm shadow-sm">
+                                <Icon name="rocket" size={18} />
+                                Connect Default
+                            </button>
+                        )}
+
                         {status === 'connected' && (
                             <button onClick={handleDisconnect} className="flex items-center gap-2 px-6 py-3 rounded-full bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100 transition-all font-bold text-sm shadow-sm">
                                 <Icon name="logout" size={18} />
@@ -413,28 +446,28 @@
                                     <div className="space-y-4 text-left">
                                         <div>
                                             <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 ml-1 tracking-widest">EC2 IP or DNS Endpoint</label>
-                                            <input type="text" placeholder="e.g. 52.43.174.60" className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl focus:ring-4 focus:ring-blue-100 focus:border-blue-500 outline-none transition-all font-bold text-slate-700" value={brokerIp} onChange={e => setBrokerIp(e.target.value)} required />
+                                            <input type="text" placeholder="e.g. 52.43.174.60" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-blue-100 outline-none transition-all font-bold text-slate-700" value={brokerIp} onChange={e => setBrokerIp(e.target.value)} required />
                                         </div>
                                         <div className="grid grid-cols-2 gap-4">
                                             <div>
                                                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 ml-1 tracking-widest">AWS Region</label>
-                                                <input type="text" placeholder="us-west-2" className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold text-slate-700 focus:ring-4 focus:ring-blue-100" value={awsRegion} onChange={e => setAwsRegion(e.target.value)} />
+                                                <input type="text" placeholder="us-west-2" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-bold text-slate-700 focus:ring-4 focus:ring-blue-100" value={awsRegion} onChange={e => setAwsRegion(e.target.value)} />
                                             </div>
                                             <div>
                                                 <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 ml-1 tracking-widest">Port</label>
-                                                <input type="text" placeholder="8081" className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none font-bold text-slate-700 focus:ring-4 focus:ring-blue-100" value={brokerPort} onChange={e => setBrokerPort(e.target.value)} />
+                                                <input type="text" placeholder="8081" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-bold text-slate-700 focus:ring-4 focus:ring-blue-100" value={brokerPort} onChange={e => setBrokerPort(e.target.value)} />
                                             </div>
                                         </div>
                                         <div>
                                             <label className="block text-[10px] font-bold text-slate-400 uppercase mb-2 ml-1 tracking-widest">Protocol</label>
-                                            <select className="w-full px-5 py-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none cursor-pointer font-bold text-slate-700 appearance-none focus:ring-4 focus:ring-blue-100 bg-white" value={protocol} onChange={e => setProtocol(e.target.value)}>
+                                            <select className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none cursor-pointer font-bold text-slate-700 appearance-none focus:ring-4 focus:ring-blue-100 bg-white" value={protocol} onChange={e => setProtocol(e.target.value)}>
                                                 <option value="wss">WSS (Secure)</option>
                                                 <option value="ws">WS (Plain)</option>
                                             </select>
                                         </div>
                                     </div>
                                     <div className="pt-2">
-                                        <button type="submit" disabled={status === 'connecting'} className="w-full py-5 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-[1.5rem] font-bold text-lg shadow-xl shadow-blue-200 transition-all flex items-center justify-center gap-3">
+                                        <button type="submit" disabled={status === 'connecting'} className="w-full py-4 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white rounded-[1.2rem] font-bold text-lg shadow-xl shadow-blue-200 transition-all flex items-center justify-center gap-3">
                                             {status === 'connecting' ? <Icon name="refresh" className="animate-spin" /> : <Icon name="server" size={20} />}
                                             {status === 'connecting' ? 'Linking...' : 'Establish Connection'}
                                         </button>
