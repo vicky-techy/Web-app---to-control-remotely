@@ -149,7 +149,7 @@
                             setIsPublishing(false);
                         }, 1000);
                         
-                        hideTimeoutRef.current = setTimeout(() => setShowSuccess(false), 3000);
+                        hideTimeoutRef.current = setTimeout(() => setShowSuccess(false), 2000);
                         return prev;
                     } else {
                         setIsPublishing(false);
@@ -357,7 +357,7 @@
                             <div className="w-full mt-4 border-t border-slate-100">
                                 <button 
                                     onClick={() => setIsMotorStatsOpen(!isMotorStatsOpen)}
-                                    className="w-full flex items-center justify-between py-4 hover:bg-slate-50 transition-colors rounded-xl"
+                                    className="w-full flex items-center justify-between py-4 transition-colors rounded-xl"
                                 >
                                     <div className="flex items-center gap-2">
                                         <Icon name="activity" size={16} className="text-indigo-600" />
@@ -535,3 +535,4 @@
     </script>
 </body>
 </html>
+
