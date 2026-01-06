@@ -27,11 +27,28 @@
             0%, 100% { opacity: 0.6; }
             50% { opacity: 1; }
         }
-        /* Critical Alert Glow */
-        .emergency-glow {
-            box-shadow: inset 0 0 40px rgba(225, 29, 72, 0.2);
-            transition: box-shadow 0.5s ease;
+
+        /* NEW: Hey Siri Style Edge Glow Animation */
+        @keyframes siri-edge-pulse {
+            0%, 100% { 
+                box-shadow: inset 0 0 20px 2px rgba(225, 29, 72, 0.4), 0 0 10px rgba(225, 29, 72, 0.1);
+                opacity: 0.5;
+            }
+            50% { 
+                box-shadow: inset 0 0 60px 10px rgba(225, 29, 72, 0.8), 0 0 25px rgba(225, 29, 72, 0.3);
+                opacity: 1;
+            }
         }
+        
+        .emergency-siri-glow {
+            position: fixed;
+            inset: 0;
+            z-index: 9999;
+            pointer-events: none;
+            animation: siri-edge-pulse 2.5s ease-in-out infinite;
+            border-radius: 0;
+        }
+
         /* Lock background scroll when modal is open */
         body.modal-open { overflow: hidden; }
     </style>
@@ -300,10 +317,10 @@
             const hasSafetyTrip = sensorData.overload || sensorData.dryrun;
 
             return (
-                <div className={`min-h-screen p-3 md:p-8 flex flex-col items-center transition-all duration-500 ${hasSafetyTrip ? 'emergency-glow' : ''}`}>
-                    {/* Critical Alert Bar */}
+                <div className="min-h-screen p-3 md:p-8 flex flex-col items-center">
+                    {/* Siri-Style Edge Glow (All Edges) */}
                     {hasSafetyTrip && (
-                        <div className="fixed top-0 left-0 right-0 h-1 bg-rose-600 z-[100] animate-pulse"></div>
+                        <div className="emergency-siri-glow"></div>
                     )}
 
                     {/* Header */}
@@ -329,7 +346,7 @@
                     <main className="w-full max-w-2xl space-y-4">
                         
                         {/* 1. MOTOR CONTROL (TOP) */}
-                        <section className="bg-white rounded-[2rem] shadow-lg border border-slate-200 p-6 flex flex-col items-center overflow-hidden">
+                        <section className="bg-white rounded-[2rem] shadow-lg border border-slate-200 p-6 flex flex-col items-center overflow-hidden relative">
                             <div className="flex justify-between w-full mb-6 items-center">
                                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-widest">3 Phase Motor</h2>
                                 <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ${sensorData.motor_state === 'ON' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>{sensorData.motor_state}</div>
@@ -346,12 +363,12 @@
                                 {getButtonText()}
                             </button>
 
-                            {/* Critical Trip Message */}
+                            {/* Critical Trip Message below button */}
                             {hasSafetyTrip && (
                                 <div className="mt-4 flex items-center gap-2 text-rose-600 bg-rose-50 px-4 py-2 rounded-xl border border-rose-100 animate-pulse">
                                     <Icon name="alert" size={14} strokeWidth={3} />
                                     <span className="text-[10px] font-black uppercase tracking-widest">
-                                        Tripped: {sensorData.overload ? 'Overload' : 'Dry-Run'} Active
+                                        Tripped: {sensorData.overload ? 'Overload' : 'Dry-Run'} Detected
                                     </span>
                                 </div>
                             )}
