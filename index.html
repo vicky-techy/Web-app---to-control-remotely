@@ -61,7 +61,12 @@
         
         const Icon = ({ name, size = 24, className = "", strokeWidth = 2 }) => {
             const icons = {
-                settings: <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"><circle cx="12" cy="12" r="3"/></path>,
+                settings: (
+                    <React.Fragment>
+                        <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.1a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                        <circle cx="12" cy="12" r="3" />
+                    </React.Fragment>
+                ),
                 check: <path d="M20 6 9 17l-5-5" />,
                 logout: <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
                 x: <path d="M18 6 6 18M6 6l12 12" />,
@@ -144,7 +149,6 @@
                 return input.trim();
             };
 
-            // Enhanced Motor Status logic with trip handling
             const handleMotorStatus = useCallback((payload) => {
                 const rawMsg = payload.trim().toUpperCase();
                 if (rawMsg !== 'ON' && rawMsg !== 'OFF') return;
@@ -173,16 +177,13 @@
                 });
             }, []);
 
-            // Enhanced Sensor Data logic with auto-off for safety trips
             const handleSensorData = useCallback((payload) => {
                 try {
                     const data = JSON.parse(payload);
                     setSensorData(prev => {
                         const nextData = { ...prev, ...data };
                         
-                        // Safety Trip Auto-Logic: If overload/dryrun active and UI thinks motor is ON
                         if ((nextData.overload || nextData.dryrun) && prev.motor_state === 'ON') {
-                            // Sync UI stop sequence
                             setConfirmedState('OFF');
                             setShowSuccess(true);
                             setTimeout(() => setShowSuccess(false), 2000);
@@ -286,13 +287,14 @@
                 const rand = (min, max) => Math.floor(Math.random() * (max - min + 1) + min);
                 const randFloat = (min, max) => (Math.random() * (max - min) + min).toFixed(1);
                 
+                // Emulator logic: Randomize currents even if state hasn't updated yet for testing
                 client.publish("esp32/data", JSON.stringify({
                     main_v: rand(225, 238),
                     main_i: randFloat(12.0, 15.5),
                     main_p: rand(3000, 3600),
                     motor_v: rand(410, 420),
-                    motor_i: sensorData.motor_state === 'ON' ? randFloat(11.5, 13.0) : 0.0,
-                    motor_p: sensorData.motor_state === 'ON' ? rand(4800, 5400) : 0,
+                    motor_i: randFloat(11.5, 13.0),
+                    motor_p: rand(4800, 5400),
                     water_level: rand(10, 95),
                     sim_quality: rand(18, 31),
                     overload: emuOverload,
@@ -300,9 +302,9 @@
                     vry: rand(412, 418),
                     vyb: rand(410, 416),
                     vbr: rand(414, 420),
-                    ir: sensorData.motor_state === 'ON' ? randFloat(6.8, 7.8) : 0.0,
-                    iy: sensorData.motor_state === 'ON' ? randFloat(7.0, 8.0) : 0.0,
-                    ib: sensorData.motor_state === 'ON' ? randFloat(6.5, 7.5) : 0.0
+                    ir: randFloat(6.8, 7.8),
+                    iy: randFloat(7.0, 8.0),
+                    ib: randFloat(6.5, 7.5)
                 }));
             };
 
