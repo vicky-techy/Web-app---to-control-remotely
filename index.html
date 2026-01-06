@@ -27,6 +27,11 @@
             0%, 100% { opacity: 0.6; }
             50% { opacity: 1; }
         }
+        /* Critical Alert Glow */
+        .emergency-glow {
+            box-shadow: inset 0 0 40px rgba(225, 29, 72, 0.2);
+            transition: box-shadow 0.5s ease;
+        }
         /* Lock background scroll when modal is open */
         body.modal-open { overflow: hidden; }
     </style>
@@ -55,7 +60,8 @@
                 wifiOff: <path d="m2 2 20 20" />,
                 activity: <path d="M22 12h-4l-3 9L9 3l-3 9H2" />,
                 chevronDown: <path d="m6 9 6 6 6-6" />,
-                chevronUp: <path d="m18 15-6-6-6 6" />
+                chevronUp: <path d="m18 15-6-6-6 6" />,
+                alert: <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3ZM12 9v4M12 17h.01" />
             };
             return (
                 <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -77,14 +83,16 @@
 
         const App = () => {
             const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-            const [isMainStatsOpen, setIsMainStatsOpen] = useState(false); // Grid dropdown
-            const [isMotorStatsOpen, setIsMotorStatsOpen] = useState(false); // Motor stats dropdown
-            const [isPhaseModalOpen, setIsPhaseModalOpen] = useState(false);
+            const [isMainStatsOpen, setIsMainStatsOpen] = useState(false);
+            const [isMotorStatsOpen, setIsMotorStatsOpen] = useState(false);
             const [isDevUnlocked, setIsDevUnlocked] = useState(false);
             const [showDevInput, setShowDevInput] = useState(false);
             const [isDevModeActive, setIsDevModeActive] = useState(false);
             const [devKeyInput, setDevKeyInput] = useState('');
             const SECRET_KEY = '563412';
+
+            const [emuOverload, setEmuOverload] = useState(false);
+            const [emuDryRun, setEmuDryRun] = useState(false);
 
             const [status, setStatus] = useState('disconnected');
             const [client, setClient] = useState(null);
@@ -99,7 +107,6 @@
                 motor_v: 0, motor_i: 0.0, motor_p: 0,
                 water_level: 0, overload: false, dryrun: false,
                 sim_quality: 0, motor_state: 'OFF',
-                // Line metrics
                 vry: 0, vyb: 0, vbr: 0,
                 ir: 0.0, iy: 0.0, ib: 0.0
             });
@@ -111,15 +118,6 @@
             const animationTimeoutRef = useRef(null);
             const hideTimeoutRef = useRef(null);
 
-            useEffect(() => {
-                if (isSettingsOpen || isPhaseModalOpen) {
-                    document.body.classList.add('modal-open');
-                } else {
-                    document.body.classList.remove('modal-open');
-                }
-                return () => document.body.classList.remove('modal-open');
-            }, [isSettingsOpen, isPhaseModalOpen]);
-
             const getFormattedHost = (input) => {
                 const ipRegex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
                 const match = input.trim().match(ipRegex);
@@ -129,6 +127,7 @@
                 return input.trim();
             };
 
+            // Enhanced Motor Status logic with trip handling
             const handleMotorStatus = useCallback((payload) => {
                 const rawMsg = payload.trim().toUpperCase();
                 if (rawMsg !== 'ON' && rawMsg !== 'OFF') return;
@@ -141,7 +140,6 @@
 
                         setConfirmedState(prevMotorState); 
                         setShowSuccess(true);
-                        
                         setTimeout(() => setConfirmedState(rawMsg), 50);
 
                         animationTimeoutRef.current = setTimeout(() => {
@@ -158,10 +156,23 @@
                 });
             }, []);
 
+            // Enhanced Sensor Data logic with auto-off for safety trips
             const handleSensorData = useCallback((payload) => {
                 try {
                     const data = JSON.parse(payload);
-                    setSensorData(prev => ({ ...prev, ...data }));
+                    setSensorData(prev => {
+                        const nextData = { ...prev, ...data };
+                        
+                        // Safety Trip Auto-Logic: If overload/dryrun active and UI thinks motor is ON
+                        if ((nextData.overload || nextData.dryrun) && prev.motor_state === 'ON') {
+                            // Sync UI stop sequence
+                            setConfirmedState('OFF');
+                            setShowSuccess(true);
+                            setTimeout(() => setShowSuccess(false), 2000);
+                            return { ...nextData, motor_state: 'OFF' };
+                        }
+                        return nextData;
+                    });
                 } catch (e) {
                     console.error("JSON Error", e);
                 }
@@ -172,7 +183,7 @@
                 setClient(null);
                 setStatus('disconnected');
                 setConfig(null);
-                setIsPublishing(false); // Handle button reset on manual disconnect
+                setIsPublishing(false);
                 if (animationTimeoutRef.current) clearTimeout(animationTimeoutRef.current);
                 if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
             };
@@ -202,7 +213,7 @@
                     mqttClient.on('error', () => setStatus('error'));
                     mqttClient.on('close', () => {
                         setStatus(prev => prev === 'connected' ? 'disconnected' : prev);
-                        setIsPublishing(false); // Reset waiting state on loss of connection
+                        setIsPublishing(false);
                     });
                     setClient(mqttClient);
                 } catch (err) { setStatus('error'); }
@@ -255,7 +266,6 @@
             
             const simulateData = () => {
                 if (!client) return;
-                // Randomized stats for each click
                 const rand = (min, max) => Math.floor(Math.random() * (max - min + 1) + min);
                 const randFloat = (min, max) => (Math.random() * (max - min) + min).toFixed(1);
                 
@@ -268,17 +278,14 @@
                     motor_p: sensorData.motor_state === 'ON' ? rand(4800, 5400) : 0,
                     water_level: rand(10, 95),
                     sim_quality: rand(18, 31),
-                    overload: false,
-                    dryrun: false,
+                    overload: emuOverload,
+                    dryrun: emuDryRun,
                     vry: rand(412, 418),
                     vyb: rand(410, 416),
                     vbr: rand(414, 420),
                     ir: sensorData.motor_state === 'ON' ? randFloat(6.8, 7.8) : 0.0,
                     iy: sensorData.motor_state === 'ON' ? randFloat(7.0, 8.0) : 0.0,
-                    ib: sensorData.motor_state === 'ON' ? randFloat(6.5, 7.5) : 0.0,
-                    v1: rand(228, 234),
-                    v2: rand(230, 236),
-                    v3: rand(229, 235)
+                    ib: sensorData.motor_state === 'ON' ? randFloat(6.5, 7.5) : 0.0
                 }));
             };
 
@@ -290,8 +297,15 @@
                 return sensorData.motor_state === 'ON' ? 'STOP MOTOR' : 'START MOTOR';
             };
 
+            const hasSafetyTrip = sensorData.overload || sensorData.dryrun;
+
             return (
-                <div className="min-h-screen p-3 md:p-8 flex flex-col items-center">
+                <div className={`min-h-screen p-3 md:p-8 flex flex-col items-center transition-all duration-500 ${hasSafetyTrip ? 'emergency-glow' : ''}`}>
+                    {/* Critical Alert Bar */}
+                    {hasSafetyTrip && (
+                        <div className="fixed top-0 left-0 right-0 h-1 bg-rose-600 z-[100] animate-pulse"></div>
+                    )}
+
                     {/* Header */}
                     <header className="w-full max-w-2xl flex justify-between items-center mb-4 bg-white p-3 rounded-2xl shadow-sm border border-slate-200">
                         <div className="flex items-center gap-2 min-w-0">
@@ -321,9 +335,10 @@
                                 <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ${sensorData.motor_state === 'ON' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>{sensorData.motor_state}</div>
                             </div>
 
-                            <button onClick={togglePower} disabled={isPublishing || status !== 'connected'} 
-                                className={`w-full max-w-xs py-4 rounded-2xl font-black text-sm sm:text-base transition-all active:scale-95 flex items-center justify-center gap-3 shadow-xl mb-6 ${
+                            <button onClick={togglePower} disabled={isPublishing || status !== 'connected' || hasSafetyTrip} 
+                                className={`w-full max-w-xs py-4 rounded-2xl font-black text-sm sm:text-base transition-all active:scale-95 flex items-center justify-center gap-3 shadow-xl ${
                                     status !== 'connected' ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none' :
+                                    hasSafetyTrip ? 'bg-rose-50 text-rose-300 cursor-not-allowed border border-rose-100 shadow-none' :
                                     sensorData.motor_state === 'ON' ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-100' : 
                                     'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-100'
                                 }`}>
@@ -331,8 +346,18 @@
                                 {getButtonText()}
                             </button>
 
+                            {/* Critical Trip Message */}
+                            {hasSafetyTrip && (
+                                <div className="mt-4 flex items-center gap-2 text-rose-600 bg-rose-50 px-4 py-2 rounded-xl border border-rose-100 animate-pulse">
+                                    <Icon name="alert" size={14} strokeWidth={3} />
+                                    <span className="text-[10px] font-black uppercase tracking-widest">
+                                        Tripped: {sensorData.overload ? 'Overload' : 'Dry-Run'} Active
+                                    </span>
+                                </div>
+                            )}
+
                             {/* 3D Animation */}
-                            <div className={`flex flex-col items-center gap-4 transition-all duration-700 perspective-container ${showSuccess ? 'opacity-100 translate-y-0' : 'h-0 opacity-0 -translate-y-4 pointer-events-none'}`}>
+                            <div className={`mt-6 flex flex-col items-center gap-4 transition-all duration-700 perspective-container ${showSuccess ? 'opacity-100 translate-y-0' : 'h-0 opacity-0 -translate-y-4 pointer-events-none overflow-hidden'}`}>
                                 <div className="relative flex items-center justify-center w-48 h-14">
                                     <div className="absolute left-6 w-12 h-12 bg-slate-200 rounded-xl socket-3d border-r-4 border-slate-300 z-10 flex items-center justify-center overflow-hidden">
                                         <div className="w-8 h-8 bg-slate-800 rounded flex gap-1.5 items-center justify-center">
@@ -350,14 +375,14 @@
                                         </div>
                                     </div>
                                 </div>
-                                <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest italic">Syncing Controller State...</div>
+                                <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest italic">Hardware Status Sync</div>
                             </div>
 
                             {/* MOTOR STATS DROPDOWN */}
                             <div className="w-full mt-4 border-t border-slate-100">
                                 <button 
                                     onClick={() => setIsMotorStatsOpen(!isMotorStatsOpen)}
-                                    className="w-full flex items-center justify-between py-4 transition-colors rounded-xl"
+                                    className="w-full flex items-center justify-between py-4 hover:bg-slate-50 transition-colors rounded-xl"
                                 >
                                     <div className="flex items-center gap-2">
                                         <Icon name="activity" size={16} className="text-indigo-600" />
@@ -367,17 +392,17 @@
                                 </button>
 
                                 {isMotorStatsOpen && (
-                                    <div className="space-y-3 pb-4 animate-in slide-in-from-top-2 duration-300">
+                                    <div className="space-y-3 pt-2 pb-4 animate-in slide-in-from-top-2 duration-300">
                                         <div className="grid grid-cols-3 gap-2">
-                                            <div className="text-center p-2 bg-slate-50 rounded-xl">
+                                            <div className="text-center p-2 bg-slate-50 rounded-xl border border-slate-100">
                                                 <span className="block text-[8px] font-bold text-slate-400 uppercase">R-Y Volts</span>
                                                 <span className="text-xs font-black text-slate-700">{sensorData.vry}V</span>
                                             </div>
-                                            <div className="text-center p-2 bg-slate-50 rounded-xl">
+                                            <div className="text-center p-2 bg-slate-50 rounded-xl border border-slate-100">
                                                 <span className="block text-[8px] font-bold text-slate-400 uppercase">Y-B Volts</span>
                                                 <span className="text-xs font-black text-slate-700">{sensorData.vyb}V</span>
                                             </div>
-                                            <div className="text-center p-2 bg-slate-50 rounded-xl">
+                                            <div className="text-center p-2 bg-slate-50 rounded-xl border border-slate-100">
                                                 <span className="block text-[8px] font-bold text-slate-400 uppercase">B-R Volts</span>
                                                 <span className="text-xs font-black text-slate-700">{sensorData.vbr}V</span>
                                             </div>
@@ -509,12 +534,29 @@
                                             </div>
                                         )}
                                         {isDevModeActive && isDevUnlocked && (
-                                            <div className="mt-4 p-4 bg-white border-2 border-indigo-50 rounded-2xl animate-in slide-in-from-top-2 duration-300 shadow-xl space-y-3">
+                                            <div className="mt-4 p-4 bg-white border-2 border-indigo-50 rounded-2xl animate-in slide-in-from-top-2 duration-300 shadow-xl space-y-4">
+                                                <div className="flex items-center gap-2 mb-1 text-indigo-600 font-black uppercase text-[10px] tracking-widest">Simulator Dashboard</div>
+                                                
                                                 <div className="grid grid-cols-2 gap-2">
                                                     <button type="button" onClick={() => simulateMotor('ON')} className="py-2.5 bg-emerald-600 text-white rounded-xl text-[9px] font-black shadow-md uppercase tracking-widest">MOTOR ON</button>
                                                     <button type="button" onClick={() => simulateMotor('OFF')} className="py-2.5 bg-rose-600 text-white rounded-xl text-[9px] font-black shadow-md uppercase tracking-widest">MOTOR OFF</button>
                                                 </div>
-                                                <button type="button" onClick={simulateData} className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-[9px] font-black shadow-md uppercase tracking-widest">Simulate JSON</button>
+
+                                                <div className="grid grid-cols-2 gap-2">
+                                                    <button type="button" onClick={() => setEmuOverload(!emuOverload)} className={`py-2 px-1 rounded-lg text-[8px] font-black uppercase transition-all flex items-center justify-center gap-1.5 border-2 ${emuOverload ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}>
+                                                        <Icon name="shield" size={10} />
+                                                        Overload: {emuOverload ? 'ON' : 'OFF'}
+                                                    </button>
+                                                    <button type="button" onClick={() => setEmuDryRun(!emuDryRun)} className={`py-2 px-1 rounded-lg text-[8px] font-black uppercase transition-all flex items-center justify-center gap-1.5 border-2 ${emuDryRun ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}>
+                                                        <Icon name="droplet" size={10} />
+                                                        Dry-Run: {emuDryRun ? 'ON' : 'OFF'}
+                                                    </button>
+                                                </div>
+
+                                                <button type="button" onClick={simulateData} className="w-full py-3 bg-indigo-600 text-white rounded-xl text-[9px] font-black shadow-md uppercase tracking-widest flex items-center justify-center gap-2">
+                                                    <Icon name="refresh" size={12} />
+                                                    Simulate JSON Data
+                                                </button>
                                             </div>
                                         )}
                                     </div>
@@ -535,4 +577,3 @@
     </script>
 </body>
 </html>
-
