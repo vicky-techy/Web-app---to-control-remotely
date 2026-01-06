@@ -53,7 +53,9 @@
                 power: <path d="M12 2v10M18.4 6.6a9 9 0 1 1-12.77.04" />,
                 wifi: <path d="M5 13a10 10 0 0 1 14 0M8.5 16.5a5 5 0 0 1 7 0M2 8.82a15 15 0 0 1 20 0M12 20h.01" />,
                 wifiOff: <path d="m2 2 20 20" />,
-                activity: <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
+                activity: <path d="M22 12h-4l-3 9L9 3l-3 9H2" />,
+                chevronDown: <path d="m6 9 6 6 6-6" />,
+                chevronUp: <path d="m18 15-6-6-6 6" />
             };
             return (
                 <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" className={className}>
@@ -75,7 +77,9 @@
 
         const App = () => {
             const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-            const [isPhaseModalOpen, setIsPhaseModalOpen] = useState(false); // Added for phase details
+            const [isMainStatsOpen, setIsMainStatsOpen] = useState(false); // Grid dropdown
+            const [isMotorStatsOpen, setIsMotorStatsOpen] = useState(false); // Motor stats dropdown
+            const [isPhaseModalOpen, setIsPhaseModalOpen] = useState(false);
             const [isDevUnlocked, setIsDevUnlocked] = useState(false);
             const [showDevInput, setShowDevInput] = useState(false);
             const [isDevModeActive, setIsDevModeActive] = useState(false);
@@ -95,9 +99,9 @@
                 motor_v: 0, motor_i: 0.0, motor_p: 0,
                 water_level: 0, overload: false, dryrun: false,
                 sim_quality: 0, motor_state: 'OFF',
-                // Detailed Phase Data
-                v1: 0, v2: 0, v3: 0,
-                i1: 0.0, i2: 0.0, i3: 0.0
+                // Line metrics
+                vry: 0, vyb: 0, vbr: 0,
+                ir: 0.0, iy: 0.0, ib: 0.0
             });
 
             const [isPublishing, setIsPublishing] = useState(false);
@@ -107,7 +111,6 @@
             const animationTimeoutRef = useRef(null);
             const hideTimeoutRef = useRef(null);
 
-            // Effect to handle scroll-lock on background when modals are open
             useEffect(() => {
                 if (isSettingsOpen || isPhaseModalOpen) {
                     document.body.classList.add('modal-open');
@@ -164,8 +167,18 @@
                 }
             }, []);
 
+            const handleDisconnect = () => {
+                if (client) client.end();
+                setClient(null);
+                setStatus('disconnected');
+                setConfig(null);
+                setIsPublishing(false); // Handle button reset on manual disconnect
+                if (animationTimeoutRef.current) clearTimeout(animationTimeoutRef.current);
+                if (hideTimeoutRef.current) clearTimeout(hideTimeoutRef.current);
+            };
+
             const startConnection = (ip, port, prot) => {
-                if (client) client.end(true);
+                if (client) handleDisconnect();
                 setStatus('connecting');
                 const targetHost = getFormattedHost(ip);
                 const brokerUrl = `${prot}://${targetHost}:${port}`;
@@ -187,7 +200,10 @@
                         if (topic === 'esp32/data') handleSensorData(payload);
                     });
                     mqttClient.on('error', () => setStatus('error'));
-                    mqttClient.on('close', () => setStatus(prev => prev === 'connected' ? 'disconnected' : prev));
+                    mqttClient.on('close', () => {
+                        setStatus(prev => prev === 'connected' ? 'disconnected' : prev);
+                        setIsPublishing(false); // Reset waiting state on loss of connection
+                    });
                     setClient(mqttClient);
                 } catch (err) { setStatus('error'); }
             };
@@ -203,13 +219,6 @@
                 setBrokerPort('8081');
                 setProtocol('wss');
                 startConnection(defaultIp, '8081', 'wss');
-            };
-
-            const handleDisconnect = () => {
-                if (client) client.end();
-                setClient(null);
-                setStatus('disconnected');
-                setConfig(null);
             };
 
             const togglePower = () => {
@@ -243,21 +252,38 @@
             }, [devKeyInput]);
 
             const simulateMotor = (state) => { if (client) client.publish("stm32/status", state); };
+            
             const simulateData = () => {
                 if (!client) return;
+                // Randomized stats for each click
+                const rand = (min, max) => Math.floor(Math.random() * (max - min + 1) + min);
+                const randFloat = (min, max) => (Math.random() * (max - min) + min).toFixed(1);
+                
                 client.publish("esp32/data", JSON.stringify({
-                    main_v: 234, main_i: 14.5, main_p: 3400,
-                    motor_v: 415, motor_i: sensorData.motor_state === 'ON' ? 12.2 : 0.0,
-                    motor_p: sensorData.motor_state === 'ON' ? 5100 : 0,
-                    water_level: 78, sim_quality: 27, overload: false, dryrun: false,
-                    v1: 230, v2: 232, v3: 231,
-                    i1: sensorData.motor_state === 'ON' ? 7.2 : 0.0,
-                    i2: sensorData.motor_state === 'ON' ? 7.5 : 0.0,
-                    i3: sensorData.motor_state === 'ON' ? 7.1 : 0.0
+                    main_v: rand(225, 238),
+                    main_i: randFloat(12.0, 15.5),
+                    main_p: rand(3000, 3600),
+                    motor_v: rand(410, 420),
+                    motor_i: sensorData.motor_state === 'ON' ? randFloat(11.5, 13.0) : 0.0,
+                    motor_p: sensorData.motor_state === 'ON' ? rand(4800, 5400) : 0,
+                    water_level: rand(10, 95),
+                    sim_quality: rand(18, 31),
+                    overload: false,
+                    dryrun: false,
+                    vry: rand(412, 418),
+                    vyb: rand(410, 416),
+                    vbr: rand(414, 420),
+                    ir: sensorData.motor_state === 'ON' ? randFloat(6.8, 7.8) : 0.0,
+                    iy: sensorData.motor_state === 'ON' ? randFloat(7.0, 8.0) : 0.0,
+                    ib: sensorData.motor_state === 'ON' ? randFloat(6.5, 7.5) : 0.0,
+                    v1: rand(228, 234),
+                    v2: rand(230, 236),
+                    v3: rand(229, 235)
                 }));
             };
 
             const getButtonText = () => {
+                if (status !== 'connected') return sensorData.motor_state === 'ON' ? 'STOP MOTOR' : 'START MOTOR';
                 if (isPublishing) {
                     return sensorData.motor_state === 'ON' ? 'STOPPING...' : 'STARTING...';
                 }
@@ -271,7 +297,7 @@
                         <div className="flex items-center gap-2 min-w-0">
                             <div className="bg-indigo-600 p-1.5 rounded-lg text-white shrink-0"><Icon name="cpu" size={20} /></div>
                             <div className="min-w-0">
-                                <h1 className="font-bold text-sm md:text-lg leading-tight truncate">Industrial ESP32</h1>
+                                <h1 className="font-bold text-sm md:text-lg leading-tight truncate">ESP32 Controller</h1>
                                 <div className="flex items-center gap-1.5">
                                     <SignalBars strength={sensorData.sim_quality} />
                                     <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">SIM900A</span>
@@ -296,8 +322,10 @@
                             </div>
 
                             <button onClick={togglePower} disabled={isPublishing || status !== 'connected'} 
-                                className={`w-full max-w-xs py-4 rounded-2xl font-black text-base transition-all active:scale-95 flex items-center justify-center gap-3 shadow-xl mb-6 ${
-                                    sensorData.motor_state === 'ON' ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-100' : 'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-100'
+                                className={`w-full max-w-xs py-4 rounded-2xl font-black text-sm sm:text-base transition-all active:scale-95 flex items-center justify-center gap-3 shadow-xl mb-6 ${
+                                    status !== 'connected' ? 'bg-slate-300 text-slate-500 cursor-not-allowed shadow-none' :
+                                    sensorData.motor_state === 'ON' ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-rose-100' : 
+                                    'bg-indigo-600 hover:bg-indigo-700 text-white shadow-indigo-100'
                                 }`}>
                                 {isPublishing ? <Icon name="refresh" className="animate-spin" /> : <Icon name="power" size={20} />}
                                 {getButtonText()}
@@ -307,7 +335,7 @@
                             <div className={`flex flex-col items-center gap-4 transition-all duration-700 perspective-container ${showSuccess ? 'opacity-100 translate-y-0' : 'h-0 opacity-0 -translate-y-4 pointer-events-none'}`}>
                                 <div className="relative flex items-center justify-center w-48 h-14">
                                     <div className="absolute left-6 w-12 h-12 bg-slate-200 rounded-xl socket-3d border-r-4 border-slate-300 z-10 flex items-center justify-center overflow-hidden">
-                                        <div className="w-8 h-8 bg-slate-800 rounded-lg flex flex-row items-center justify-center gap-2">
+                                        <div className="w-8 h-8 bg-slate-800 rounded flex gap-1.5 items-center justify-center">
                                             <div className={`w-1 h-5 rounded-full transition-all duration-700 ${confirmedState === 'ON' ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,1)]' : 'bg-slate-950/50'}`}></div>
                                             <div className={`w-1 h-5 rounded-full transition-all duration-700 ${confirmedState === 'ON' ? 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,1)]' : 'bg-slate-950/50'}`}></div>
                                         </div>
@@ -325,51 +353,92 @@
                                 <div className="text-[8px] font-black text-slate-400 uppercase tracking-widest italic">Syncing Controller State...</div>
                             </div>
 
-                            <div className="w-full grid grid-cols-3 gap-2 pt-4 border-t border-slate-100">
-                                <button onClick={() => setIsPhaseModalOpen(true)} className="flex flex-col items-center justify-center p-2 bg-indigo-50 border border-indigo-100 rounded-xl hover:bg-indigo-100 active:scale-95 transition-all">
-                                    <span className="text-[8px] font-black text-indigo-500 uppercase mb-1">Phase Stats</span>
-                                    <Icon name="activity" size={14} className="text-indigo-600" />
+                            {/* MOTOR STATS DROPDOWN */}
+                            <div className="w-full mt-4 border-t border-slate-100">
+                                <button 
+                                    onClick={() => setIsMotorStatsOpen(!isMotorStatsOpen)}
+                                    className="w-full flex items-center justify-between py-4 hover:bg-slate-50 transition-colors rounded-xl"
+                                >
+                                    <div className="flex items-center gap-2">
+                                        <Icon name="activity" size={16} className="text-indigo-600" />
+                                        <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Motor Diagnostics</span>
+                                    </div>
+                                    <Icon name={isMotorStatsOpen ? "chevronUp" : "chevronDown"} size={16} className="text-slate-400" />
                                 </button>
-                                <div className="text-center p-2 bg-slate-50 rounded-xl border border-emerald-100">
-                                    <span className="block text-[8px] font-bold text-emerald-400 uppercase tracking-tighter">Load Amps</span>
-                                    <span className="text-xs font-black text-emerald-700 font-mono tracking-tighter">{sensorData.motor_i}A</span>
-                                </div>
-                                <div className="text-center p-2 bg-slate-50 rounded-xl">
-                                    <span className="block text-[8px] font-bold text-slate-400 uppercase tracking-tighter">Motor Power</span>
-                                    <span className="text-xs font-black text-slate-700 font-mono tracking-tighter">{sensorData.motor_p}W</span>
-                                </div>
+
+                                {isMotorStatsOpen && (
+                                    <div className="space-y-3 pb-4 animate-in slide-in-from-top-2 duration-300">
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <div className="text-center p-2 bg-slate-50 rounded-xl">
+                                                <span className="block text-[8px] font-bold text-slate-400 uppercase">R-Y Volts</span>
+                                                <span className="text-xs font-black text-slate-700">{sensorData.vry}V</span>
+                                            </div>
+                                            <div className="text-center p-2 bg-slate-50 rounded-xl">
+                                                <span className="block text-[8px] font-bold text-slate-400 uppercase">Y-B Volts</span>
+                                                <span className="text-xs font-black text-slate-700">{sensorData.vyb}V</span>
+                                            </div>
+                                            <div className="text-center p-2 bg-slate-50 rounded-xl">
+                                                <span className="block text-[8px] font-bold text-slate-400 uppercase">B-R Volts</span>
+                                                <span className="text-xs font-black text-slate-700">{sensorData.vbr}V</span>
+                                            </div>
+                                        </div>
+                                        <div className="grid grid-cols-3 gap-2">
+                                            <div className="text-center p-2 bg-red-50/50 rounded-xl border border-red-100">
+                                                <span className="block text-[8px] font-bold text-red-400 uppercase">R Amps</span>
+                                                <span className="text-xs font-black text-red-700">{sensorData.ir}A</span>
+                                            </div>
+                                            <div className="text-center p-2 bg-yellow-50/50 rounded-xl border border-yellow-200">
+                                                <span className="block text-[8px] font-bold text-yellow-500 uppercase">Y Amps</span>
+                                                <span className="text-xs font-black text-yellow-700">{sensorData.iy}A</span>
+                                            </div>
+                                            <div className="text-center p-2 bg-blue-50/50 rounded-xl border border-blue-100">
+                                                <span className="block text-[8px] font-bold text-blue-400 uppercase">B Amps</span>
+                                                <span className="text-xs font-black text-blue-700">{sensorData.ib}A</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         </section>
 
-                        {/* 2. MAINS SUPPLY */}
-                        <section className="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm">
-                            <div className="flex items-center gap-2 mb-4 border-b border-slate-50 pb-2">
-                                <Icon name="zap" size={16} className="text-amber-500" />
-                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Main Grid Power</span>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1">
-                                    <span className="text-[9px] font-bold text-slate-400 uppercase">Input Voltage</span>
-                                    <div className="flex items-baseline gap-1">
-                                        <span className="text-2xl font-black text-slate-800">{sensorData.main_v}</span>
-                                        <span className="text-[10px] font-bold text-slate-400">VAC</span>
+                        {/* 2. MAINS SUPPLY (DROPDOWN) */}
+                        <section className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden transition-all duration-300">
+                            <button 
+                                onClick={() => setIsMainStatsOpen(!isMainStatsOpen)}
+                                className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors"
+                            >
+                                <div className="flex items-center gap-2">
+                                    <Icon name="zap" size={16} className="text-amber-500" />
+                                    <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Main Supply Monitoring</span>
+                                </div>
+                                <Icon name={isMainStatsOpen ? "chevronUp" : "chevronDown"} size={16} className="text-slate-400" />
+                            </button>
+                            
+                            {isMainStatsOpen && (
+                                <div className="p-5 pt-0 grid grid-cols-2 gap-4 animate-in slide-in-from-top-2 duration-300">
+                                    <div className="space-y-1">
+                                        <span className="text-[9px] font-bold text-slate-400 uppercase">Line Voltage</span>
+                                        <div className="flex items-baseline gap-1">
+                                            <span className="text-xl sm:text-2xl font-black text-slate-800">{sensorData.main_v}</span>
+                                            <span className="text-[10px] font-bold text-slate-400">VAC</span>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1 bg-indigo-50/30 p-3 rounded-2xl border border-indigo-50">
+                                        <span className="text-[9px] font-black text-indigo-500 uppercase">Current Usage</span>
+                                        <div className="flex items-baseline gap-1">
+                                            <span className="text-2xl sm:text-4xl font-black text-indigo-700 leading-none">{sensorData.main_i}</span>
+                                            <span className="text-[10px] font-bold text-indigo-400">AMPS</span>
+                                        </div>
+                                    </div>
+                                    <div className="col-span-2 bg-slate-900 p-4 rounded-2xl flex justify-between items-center shadow-inner">
+                                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Active Power Load</span>
+                                        <div className="flex items-baseline gap-1">
+                                            <span className="text-2xl sm:text-3xl font-black text-white">{sensorData.main_p}</span>
+                                            <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">WATTS</span>
+                                        </div>
                                     </div>
                                 </div>
-                                <div className="space-y-1 bg-slate-50 p-3 rounded-2xl border border-slate-100">
-                                    <span className="text-[9px] font-black text-indigo-500 uppercase">Input Current</span>
-                                    <div className="flex items-baseline gap-1">
-                                        <span className="text-3xl font-black text-indigo-700 leading-none">{sensorData.main_i}</span>
-                                        <span className="text-[10px] font-bold text-indigo-400">AMPS</span>
-                                    </div>
-                                </div>
-                                <div className="col-span-2 bg-slate-900 p-4 rounded-2xl flex justify-between items-center">
-                                    <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Active Power Load</span>
-                                    <div className="flex items-baseline gap-1">
-                                        <span className="text-2xl font-black text-white">{sensorData.main_p}</span>
-                                        <span className="text-[10px] font-black text-indigo-400 tracking-widest">WATTS</span>
-                                    </div>
-                                </div>
-                            </div>
+                            )}
                         </section>
 
                         {/* 3. SAFETY & TANK */}
@@ -392,7 +461,7 @@
                                 </div>
                                 <div>
                                     <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">Water Storage</span>
-                                    <span className="text-xs font-black text-slate-700 block">Tank Capacity</span>
+                                    <span className="text-xs font-black text-slate-700 block text-ellipsis truncate">Tank Capacity</span>
                                     <div className={`mt-2 w-fit px-2 py-0.5 rounded text-[8px] font-black uppercase ${sensorData.water_level > 20 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
                                         {sensorData.water_level > 20 ? 'Normal' : 'Low'}
                                     </div>
@@ -401,7 +470,7 @@
                         </div>
                     </main>
 
-                    {/* Actions */}
+                    {/* Footer Actions */}
                     <div className="mt-8 flex flex-wrap justify-center gap-3">
                         <button onClick={() => setIsSettingsOpen(true)} className="flex items-center gap-2 px-5 py-2 rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all font-bold text-xs shadow-sm ring-1 ring-slate-100"><Icon name="settings" size={14} />Settings</button>
                         {(status === 'disconnected' || status === 'error') && (
@@ -413,53 +482,17 @@
                     </div>
                     <div className="mt-6 text-center opacity-40 uppercase tracking-widest text-[9px] font-black">Developed by Vinay K</div>
 
-                    {/* Phase Stats Modal: PC/Mobile Optimized */}
-                    {isPhaseModalOpen && (
-                        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300">
-                            <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl border border-slate-200 flex flex-col max-h-[95vh] overflow-hidden min-h-[500px]">
-                                <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-indigo-50/50 shrink-0">
-                                    <div className="flex items-center gap-3">
-                                        <div className="p-2 bg-indigo-600 rounded-xl text-white"><Icon name="activity" size={18} /></div>
-                                        <h3 className="font-bold text-sm text-slate-800 uppercase tracking-widest">Phase Metrics</h3>
-                                    </div>
-                                    <button onClick={() => setIsPhaseModalOpen(false)} className="text-slate-400 hover:text-rose-500 p-1"><Icon name="x" size={20} /></button>
-                                </div>
-                                <div className="p-6 space-y-4 overflow-y-auto">
-                                    {[1, 2, 3].map(phase => (
-                                        <div key={phase} className="bg-slate-50 p-4 rounded-2xl border border-slate-200 flex justify-between items-center">
-                                            <div className="flex flex-col">
-                                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Phase {phase}</span>
-                                                <div className="flex items-baseline gap-1">
-                                                    <span className="text-xl font-black text-slate-800">{sensorData[`v${phase}`]}</span>
-                                                    <span className="text-[9px] font-bold text-slate-400">V</span>
-                                                </div>
-                                            </div>
-                                            <div className="text-right">
-                                                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Current</span>
-                                                <div className="flex items-baseline gap-1 justify-end">
-                                                    <span className="text-xl font-black text-indigo-600">{sensorData[`i${phase}`]}</span>
-                                                    <span className="text-[9px] font-bold text-indigo-400">A</span>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    ))}
-                                    <button onClick={() => setIsPhaseModalOpen(false)} className="w-full py-4 bg-slate-900 text-white rounded-xl font-black text-xs uppercase tracking-widest mt-2">Dismiss Details</button>
-                                </div>
-                            </div>
-                        </div>
-                    )}
-
                     {/* Settings Modal */}
                     {isSettingsOpen && (
-                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300 overflow-y-auto">
-                            <div className="bg-white w-full max-w-sm my-auto rounded-[2rem] shadow-2xl border border-slate-200 overflow-hidden font-sans">
+                        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-md animate-in fade-in duration-300 overflow-y-auto font-sans">
+                            <div className="bg-white w-full max-w-sm my-auto rounded-[2.5rem] shadow-2xl border border-slate-200 overflow-hidden">
                                 <div className="p-5 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
                                     <div className="flex items-center gap-3"><div className="p-2 bg-indigo-600 rounded-xl text-white"><Icon name="cpu" size={18} /></div><h3 className="font-bold text-sm text-slate-800 uppercase tracking-widest">Configuration</h3></div>
-                                    <button onClick={() => setIsSettingsOpen(false)} className="text-slate-400 p-1"><Icon name="x" size={20} /></button>
+                                    <button onClick={() => setIsSettingsOpen(false)} className="text-slate-400 hover:text-rose-500 p-1"><Icon name="x" size={20} /></button>
                                 </div>
                                 <form onSubmit={handleConnect} className="p-5 space-y-5">
                                     <div className="space-y-4">
-                                        <div><label className="block text-[9px] font-black text-slate-400 uppercase mb-1.5 ml-1 tracking-widest">EC2 IP Address</label><input type="text" placeholder="e.g. 52.43.174.60" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-indigo-100 outline-none transition-all font-bold text-xs text-slate-700" value={brokerIp} onChange={e => setBrokerIp(e.target.value)} required /></div>
+                                        <div><label className="block text-[9px] font-black text-slate-400 uppercase mb-1.5 ml-1 tracking-widest">EC2 Host/IP</label><input type="text" placeholder="e.g. 52.43.174.60" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-4 focus:ring-indigo-100 outline-none transition-all font-bold text-xs text-slate-700" value={brokerIp} onChange={e => setBrokerIp(e.target.value)} required /></div>
                                         <div className="grid grid-cols-2 gap-3">
                                             <div><label className="block text-[9px] font-black text-slate-400 uppercase mb-1.5 ml-1 tracking-widest">Region</label><input type="text" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-bold text-xs text-slate-700" value={awsRegion} onChange={e => setAwsRegion(e.target.value)} /></div>
                                             <div><label className="block text-[9px] font-black text-slate-400 uppercase mb-1.5 ml-1 tracking-widest">Port</label><input type="text" className="w-full px-4 py-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-bold text-xs text-slate-700" value={brokerPort} onChange={e => setBrokerPort(e.target.value)} /></div>
@@ -472,7 +505,7 @@
                                         </div>
                                         {showDevInput && !isDevUnlocked && (
                                             <div className="mt-3 p-3 bg-slate-50 rounded-xl border border-slate-200 animate-in slide-in-from-top-2">
-                                                <input type="password" placeholder="Enter 6-digit key..." maxLength="6" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-indigo-400 transition-all font-mono text-center tracking-[0.5em] font-bold" value={devKeyInput} onChange={(e) => setDevKeyInput(e.target.value)} />
+                                                <input type="password" placeholder="ENTER 6-DIGIT KEY" maxLength="6" className="w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-indigo-400 transition-all font-mono text-center tracking-[0.5em] font-bold" value={devKeyInput} onChange={(e) => setDevKeyInput(e.target.value)} />
                                             </div>
                                         )}
                                         {isDevModeActive && isDevUnlocked && (
@@ -481,13 +514,13 @@
                                                     <button type="button" onClick={() => simulateMotor('ON')} className="py-2.5 bg-emerald-600 text-white rounded-xl text-[9px] font-black shadow-md uppercase tracking-widest">MOTOR ON</button>
                                                     <button type="button" onClick={() => simulateMotor('OFF')} className="py-2.5 bg-rose-600 text-white rounded-xl text-[9px] font-black shadow-md uppercase tracking-widest">MOTOR OFF</button>
                                                 </div>
-                                                <button type="button" onClick={simulateData} className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-[9px] font-black shadow-md uppercase tracking-widest">SIMULATE JSON DATA</button>
+                                                <button type="button" onClick={simulateData} className="w-full py-2.5 bg-indigo-600 text-white rounded-xl text-[9px] font-black shadow-md uppercase tracking-widest">Simulate JSON</button>
                                             </div>
                                         )}
                                     </div>
                                     <button type="submit" disabled={status === 'connecting'} className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 disabled:bg-indigo-400 text-white rounded-[1.2rem] font-black text-sm shadow-xl shadow-indigo-200 transition-all flex items-center justify-center gap-3 uppercase tracking-widest">
                                         {status === 'connecting' ? <Icon name="refresh" className="animate-spin" /> : <Icon name="settings" size={20} />}
-                                        {status === 'connecting' ? 'Linking...' : 'Establish Connection'}
+                                        {status === 'connecting' ? 'Linking...' : 'Connect'}
                                     </button>
                                 </form>
                             </div>
@@ -502,6 +535,3 @@
     </script>
 </body>
 </html>
-
-
-
