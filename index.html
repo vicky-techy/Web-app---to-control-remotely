@@ -22,13 +22,8 @@
         .socket-3d { transform: rotateY(15deg); box-shadow: 4px 4px 15px rgba(0,0,0,0.1); }
         .plug-3d { transform-style: preserve-3d; box-shadow: 8px 8px 15px rgba(0,0,0,0.2); }
         .level-transition { transition: height 1s cubic-bezier(0.4, 0, 0.2, 1); }
-        .status-pulse { animation: pulse-glow 2s infinite; }
-        @keyframes pulse-glow {
-            0%, 100% { opacity: 0.6; }
-            50% { opacity: 1; }
-        }
-
-        /* NEW: Hey Siri Style Edge Glow Animation */
+        
+        /* Hey Siri Style Edge Glow Animation */
         @keyframes siri-edge-pulse {
             0%, 100% { 
                 box-shadow: inset 0 0 20px 2px rgba(225, 29, 72, 0.4), 0 0 10px rgba(225, 29, 72, 0.1);
@@ -46,14 +41,12 @@
             z-index: 9999;
             pointer-events: none;
             animation: siri-edge-pulse 2.5s ease-in-out infinite;
-            border-radius: 0;
         }
 
-        /* Lock background scroll when modal is open */
         body.modal-open { overflow: hidden; }
     </style>
 </head>
-<body class="bg-slate-50 text-slate-900 antialiased font-sans">
+<body class="bg-slate-50 text-slate-900 antialiased font-sans transition-all duration-500">
     <div id="root"></div>
 
     <script type="text/babel">
@@ -67,7 +60,6 @@
                         <circle cx="12" cy="12" r="3" />
                     </React.Fragment>
                 ),
-                check: <path d="M20 6 9 17l-5-5" />,
                 logout: <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
                 x: <path d="M18 6 6 18M6 6l12 12" />,
                 refresh: <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8M21 3v5h-5M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16M3 21v-5h5" />,
@@ -124,13 +116,14 @@
             const [awsRegion, setAwsRegion] = useState('us-west-2');
             const [config, setConfig] = useState(null);
 
+            // Raw sensor state from 3x PZEM-004T
             const [sensorData, setSensorData] = useState({
-                main_v: 0, main_i: 0.0, main_p: 0,
-                motor_v: 0, motor_i: 0.0, motor_p: 0,
-                water_level: 0, overload: false, dryrun: false,
-                sim_quality: 0, motor_state: 'OFF',
-                vry: 0, vyb: 0, vbr: 0,
-                ir: 0.0, iy: 0.0, ib: 0.0
+                vr: 0, vy: 0, vb: 0,
+                ir: 0.0, iy: 0.0, ib: 0.0,
+                pr: 0, py: 0, pb: 0,
+                water_level: 0, sim_quality: 0,
+                overload: false, dryrun: false,
+                motor_state: 'OFF'
             });
 
             const [isPublishing, setIsPublishing] = useState(false);
@@ -139,6 +132,24 @@
 
             const animationTimeoutRef = useRef(null);
             const hideTimeoutRef = useRef(null);
+
+            // Calculation Logic in Webapp
+            // VLine = sqrt(Va^2 + Vb^2 + Va*Vb) for vector difference magnitude
+            const calcVRY = Math.sqrt(Math.pow(sensorData.vr, 2) + Math.pow(sensorData.vy, 2) + (sensorData.vr * sensorData.vy)).toFixed(0);
+            const calcVYB = Math.sqrt(Math.pow(sensorData.vy, 2) + Math.pow(sensorData.vb, 2) + (sensorData.vy * sensorData.vb)).toFixed(0);
+            const calcVBR = Math.sqrt(Math.pow(sensorData.vb, 2) + Math.pow(sensorData.vr, 2) + (sensorData.vb * sensorData.vr)).toFixed(0);
+            const totalPower = (sensorData.pr + sensorData.py + sensorData.pb);
+            const avgVolt = ((sensorData.vr + sensorData.vy + sensorData.vb) / 3).toFixed(0);
+            const avgCurr = ((sensorData.ir + sensorData.iy + sensorData.ib) / 3).toFixed(1);
+
+            useEffect(() => {
+                if (isSettingsOpen) {
+                    document.body.classList.add('modal-open');
+                } else {
+                    document.body.classList.remove('modal-open');
+                }
+                return () => document.body.classList.remove('modal-open');
+            }, [isSettingsOpen]);
 
             const getFormattedHost = (input) => {
                 const ipRegex = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
@@ -182,7 +193,7 @@
                     const data = JSON.parse(payload);
                     setSensorData(prev => {
                         const nextData = { ...prev, ...data };
-                        
+                        // Trigger safety trip sync
                         if ((nextData.overload || nextData.dryrun) && prev.motor_state === 'ON') {
                             setConfirmedState('OFF');
                             setShowSuccess(true);
@@ -287,24 +298,21 @@
                 const rand = (min, max) => Math.floor(Math.random() * (max - min + 1) + min);
                 const randFloat = (min, max) => (Math.random() * (max - min) + min).toFixed(1);
                 
-                // Emulator logic: Randomize currents even if state hasn't updated yet for testing
+                // CORRECTED: Sends raw data in requested JSON structure
                 client.publish("esp32/data", JSON.stringify({
-                    main_v: rand(225, 238),
-                    main_i: randFloat(12.0, 15.5),
-                    main_p: rand(3000, 3600),
-                    motor_v: rand(410, 420),
-                    motor_i: randFloat(11.5, 13.0),
-                    motor_p: rand(4800, 5400),
+                    vr: rand(225, 238),
+                    vy: rand(225, 238),
+                    vb: rand(225, 238),
+                    ir: randFloat(4.5, 6.0),
+                    iy: randFloat(4.5, 6.0),
+                    ib: randFloat(4.5, 6.0),
+                    pr: rand(1000, 1200),
+                    py: rand(1000, 1200),
+                    pb: rand(1000, 1200),
                     water_level: rand(10, 95),
                     sim_quality: rand(18, 31),
                     overload: emuOverload,
-                    dryrun: emuDryRun,
-                    vry: rand(412, 418),
-                    vyb: rand(410, 416),
-                    vbr: rand(414, 420),
-                    ir: randFloat(6.8, 7.8),
-                    iy: randFloat(7.0, 8.0),
-                    ib: randFloat(6.5, 7.5)
+                    dryrun: emuDryRun
                 }));
             };
 
@@ -320,17 +328,15 @@
 
             return (
                 <div className="min-h-screen p-3 md:p-8 flex flex-col items-center">
-                    {/* Siri-Style Edge Glow (All Edges) */}
-                    {hasSafetyTrip && (
-                        <div className="emergency-siri-glow"></div>
-                    )}
+                    {/* Siri-Style Edge Glow */}
+                    {hasSafetyTrip && <div className="emergency-siri-glow"></div>}
 
                     {/* Header */}
                     <header className="w-full max-w-2xl flex justify-between items-center mb-4 bg-white p-3 rounded-2xl shadow-sm border border-slate-200">
                         <div className="flex items-center gap-2 min-w-0">
                             <div className="bg-indigo-600 p-1.5 rounded-lg text-white shrink-0"><Icon name="cpu" size={20} /></div>
                             <div className="min-w-0">
-                                <h1 className="font-bold text-sm md:text-lg leading-tight truncate">ESP32 Controller</h1>
+                                <h1 className="font-bold text-sm md:text-lg leading-tight truncate">ESP32 Power Node</h1>
                                 <div className="flex items-center gap-1.5">
                                     <SignalBars strength={sensorData.sim_quality} />
                                     <span className="text-[9px] font-black text-slate-400 uppercase tracking-tighter">SIM900A</span>
@@ -347,8 +353,8 @@
 
                     <main className="w-full max-w-2xl space-y-4">
                         
-                        {/* 1. MOTOR CONTROL (TOP) */}
-                        <section className="bg-white rounded-[2rem] shadow-lg border border-slate-200 p-6 flex flex-col items-center overflow-hidden relative">
+                        {/* 1. MOTOR CONTROL */}
+                        <section className="bg-white rounded-[2rem] shadow-lg border border-slate-200 p-6 flex flex-col items-center overflow-hidden">
                             <div className="flex justify-between w-full mb-6 items-center">
                                 <h2 className="text-sm font-black text-slate-800 uppercase tracking-widest">3 Phase Motor</h2>
                                 <div className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest transition-all ${sensorData.motor_state === 'ON' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-400'}`}>{sensorData.motor_state}</div>
@@ -365,13 +371,11 @@
                                 {getButtonText()}
                             </button>
 
-                            {/* Critical Trip Message below button */}
+                            {/* Trip Message */}
                             {hasSafetyTrip && (
                                 <div className="mt-4 flex items-center gap-2 text-rose-600 bg-rose-50 px-4 py-2 rounded-xl border border-rose-100 animate-pulse">
                                     <Icon name="alert" size={14} strokeWidth={3} />
-                                    <span className="text-[10px] font-black uppercase tracking-widest">
-                                        Tripped: {sensorData.overload ? 'Overload' : 'Dry-Run'} Detected
-                                    </span>
+                                    <span className="text-[10px] font-black uppercase tracking-widest">Tripped: {sensorData.overload ? 'Overload' : 'Dry-Run'} Detected</span>
                                 </div>
                             )}
 
@@ -399,10 +403,7 @@
 
                             {/* MOTOR STATS DROPDOWN */}
                             <div className="w-full mt-4 border-t border-slate-100">
-                                <button 
-                                    onClick={() => setIsMotorStatsOpen(!isMotorStatsOpen)}
-                                    className="w-full flex items-center justify-between py-4 hover:bg-slate-50 transition-colors rounded-xl"
-                                >
+                                <button onClick={() => setIsMotorStatsOpen(!isMotorStatsOpen)} className="w-full flex items-center justify-between py-4 hover:bg-slate-50 transition-colors rounded-xl">
                                     <div className="flex items-center gap-2">
                                         <Icon name="activity" size={16} className="text-indigo-600" />
                                         <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Motor Diagnostics</span>
@@ -412,31 +413,31 @@
 
                                 {isMotorStatsOpen && (
                                     <div className="space-y-3 pt-2 pb-4 animate-in slide-in-from-top-2 duration-300">
-                                        <div className="grid grid-cols-3 gap-2">
-                                            <div className="text-center p-2 bg-slate-50 rounded-xl border border-slate-100">
+                                        <div className="grid grid-cols-3 gap-2 text-center">
+                                            <div className="p-2 bg-slate-50 rounded-xl border border-slate-100">
                                                 <span className="block text-[8px] font-bold text-slate-400 uppercase">R-Y Volts</span>
-                                                <span className="text-xs font-black text-slate-700">{sensorData.vry}V</span>
+                                                <span className="text-xs font-black text-slate-700">{calcVRY}V</span>
                                             </div>
-                                            <div className="text-center p-2 bg-slate-50 rounded-xl border border-slate-100">
+                                            <div className="p-2 bg-slate-50 rounded-xl border border-slate-100">
                                                 <span className="block text-[8px] font-bold text-slate-400 uppercase">Y-B Volts</span>
-                                                <span className="text-xs font-black text-slate-700">{sensorData.vyb}V</span>
+                                                <span className="text-xs font-black text-slate-700">{calcVYB}V</span>
                                             </div>
-                                            <div className="text-center p-2 bg-slate-50 rounded-xl border border-slate-100">
+                                            <div className="p-2 bg-slate-50 rounded-xl border border-slate-100">
                                                 <span className="block text-[8px] font-bold text-slate-400 uppercase">B-R Volts</span>
-                                                <span className="text-xs font-black text-slate-700">{sensorData.vbr}V</span>
+                                                <span className="text-xs font-black text-slate-700">{calcVBR}V</span>
                                             </div>
                                         </div>
-                                        <div className="grid grid-cols-3 gap-2">
-                                            <div className="text-center p-2 bg-red-50/50 rounded-xl border border-red-100">
-                                                <span className="block text-[8px] font-bold text-red-400 uppercase">R Amps</span>
+                                        <div className="grid grid-cols-3 gap-2 text-center">
+                                            <div className="p-2 bg-red-50/50 rounded-xl border border-red-100">
+                                                <span className="block text-[8px] font-bold text-red-400 uppercase leading-none mb-1">R Amps</span>
                                                 <span className="text-xs font-black text-red-700">{sensorData.ir}A</span>
                                             </div>
-                                            <div className="text-center p-2 bg-yellow-50/50 rounded-xl border border-yellow-200">
-                                                <span className="block text-[8px] font-bold text-yellow-500 uppercase">Y Amps</span>
+                                            <div className="p-2 bg-yellow-50/50 rounded-xl border border-yellow-200">
+                                                <span className="block text-[8px] font-bold text-yellow-600 uppercase leading-none mb-1">Y Amps</span>
                                                 <span className="text-xs font-black text-yellow-700">{sensorData.iy}A</span>
                                             </div>
-                                            <div className="text-center p-2 bg-blue-50/50 rounded-xl border border-blue-100">
-                                                <span className="block text-[8px] font-bold text-blue-400 uppercase">B Amps</span>
+                                            <div className="p-2 bg-blue-50/50 rounded-xl border border-blue-100">
+                                                <span className="block text-[8px] font-bold text-blue-400 uppercase leading-none mb-1">B Amps</span>
                                                 <span className="text-xs font-black text-blue-700">{sensorData.ib}A</span>
                                             </div>
                                         </div>
@@ -445,52 +446,58 @@
                             </div>
                         </section>
 
-                        {/* 2. MAINS SUPPLY (DROPDOWN) */}
+                        {/* 2. MAINS SUPPLY DROPDOWN */}
                         <section className="bg-white rounded-[2rem] border border-slate-200 shadow-sm overflow-hidden transition-all duration-300">
-                            <button 
-                                onClick={() => setIsMainStatsOpen(!isMainStatsOpen)}
-                                className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors"
-                            >
+                            <button onClick={() => setIsMainStatsOpen(!isMainStatsOpen)} className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors">
                                 <div className="flex items-center gap-2">
                                     <Icon name="zap" size={16} className="text-amber-500" />
                                     <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Main Supply Monitoring</span>
                                 </div>
-                                <Icon name={isMainStatsOpen ? "chevronUp" : "chevronDown"} size={16} className="text-slate-400" />
+                                <div className="flex items-center gap-4">
+                                    {!isMainStatsOpen && (
+                                        <div className="hidden sm:flex gap-3 text-[10px] font-black text-slate-400">
+                                            <span>{avgVolt}V</span>
+                                            <span>{avgCurr}A</span>
+                                            <span className="text-indigo-500">{totalPower}W</span>
+                                        </div>
+                                    )}
+                                    <Icon name={isMainStatsOpen ? "chevronUp" : "chevronDown"} size={16} className="text-slate-400" />
+                                </div>
                             </button>
                             
                             {isMainStatsOpen && (
                                 <div className="p-5 pt-0 grid grid-cols-2 gap-4 animate-in slide-in-from-top-2 duration-300">
                                     <div className="space-y-1">
-                                        <span className="text-[9px] font-bold text-slate-400 uppercase">Line Voltage</span>
+                                        <span className="text-[9px] font-bold text-slate-400 uppercase tracking-tighter">Avg Line Voltage</span>
                                         <div className="flex items-baseline gap-1">
-                                            <span className="text-xl sm:text-2xl font-black text-slate-800">{sensorData.main_v}</span>
+                                            <span className="text-xl sm:text-2xl font-black text-slate-800">{avgVolt}</span>
                                             <span className="text-[10px] font-bold text-slate-400">VAC</span>
                                         </div>
                                     </div>
                                     <div className="space-y-1 bg-indigo-50/30 p-3 rounded-2xl border border-indigo-50">
-                                        <span className="text-[9px] font-black text-indigo-500 uppercase">Current Usage</span>
+                                        <span className="text-[9px] font-black text-indigo-500 uppercase tracking-tighter">Avg Usage</span>
                                         <div className="flex items-baseline gap-1">
-                                            <span className="text-2xl sm:text-4xl font-black text-indigo-700 leading-none">{sensorData.main_i}</span>
+                                            <span className="text-2xl sm:text-4xl font-black text-indigo-700 leading-none">{avgCurr}</span>
                                             <span className="text-[10px] font-bold text-indigo-400">AMPS</span>
                                         </div>
                                     </div>
                                     <div className="col-span-2 bg-slate-900 p-4 rounded-2xl flex justify-between items-center shadow-inner">
-                                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Active Power Load</span>
+                                        <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Total Active Load</span>
                                         <div className="flex items-baseline gap-1">
-                                            <span className="text-2xl sm:text-3xl font-black text-white">{sensorData.main_p}</span>
-                                            <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">WATTS</span>
+                                            <span className="text-2xl sm:text-3xl font-black text-white">{totalPower}</span>
+                                            <span className="text-[9px] font-black text-indigo-400 uppercase tracking-widest">Watts</span>
                                         </div>
                                     </div>
                                 </div>
                             )}
                         </section>
 
-                        {/* 3. SAFETY & TANK */}
+                        {/* 3. PROTECTION & TANK */}
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="bg-white p-5 rounded-[2rem] border border-slate-200 shadow-sm flex flex-col justify-center">
                                 <div className="flex items-center gap-2 mb-4">
                                     <Icon name="shield" size={16} className="text-rose-500" />
-                                    <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Circuit Protection</span>
+                                    <span className="text-[10px] font-black text-slate-600 uppercase tracking-widest">Protection Status</span>
                                 </div>
                                 <div className="flex gap-2">
                                     <div className={`flex-1 py-2.5 rounded-xl text-[9px] font-black text-center border transition-all ${sensorData.overload ? 'bg-rose-50 border-rose-200 text-rose-600 animate-pulse' : 'bg-slate-50 border-slate-100 text-slate-400'}`}>OVERLOAD</div>
@@ -505,10 +512,8 @@
                                 </div>
                                 <div>
                                     <span className="text-[9px] font-black text-slate-400 uppercase block mb-1">Water Storage</span>
-                                    <span className="text-xs font-black text-slate-700 block text-ellipsis truncate">Tank Capacity</span>
-                                    <div className={`mt-2 w-fit px-2 py-0.5 rounded text-[8px] font-black uppercase ${sensorData.water_level > 20 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>
-                                        {sensorData.water_level > 20 ? 'Normal' : 'Low'}
-                                    </div>
+                                    <span className="text-xs font-black text-slate-700 block truncate">Tank Capacity</span>
+                                    <div className={`mt-2 w-fit px-2 py-0.5 rounded text-[8px] font-black uppercase ${sensorData.water_level > 20 ? 'bg-emerald-50 text-emerald-600' : 'bg-rose-50 text-rose-600'}`}>{sensorData.water_level > 20 ? 'Normal' : 'Low'}</div>
                                 </div>
                             </div>
                         </div>
@@ -563,18 +568,15 @@
 
                                                 <div className="grid grid-cols-2 gap-2">
                                                     <button type="button" onClick={() => setEmuOverload(!emuOverload)} className={`py-2 px-1 rounded-lg text-[8px] font-black uppercase transition-all flex items-center justify-center gap-1.5 border-2 ${emuOverload ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}>
-                                                        <Icon name="shield" size={10} />
-                                                        Overload: {emuOverload ? 'ON' : 'OFF'}
+                                                        <Icon name="shield" size={10} /> Overload: {emuOverload ? 'ON' : 'OFF'}
                                                     </button>
                                                     <button type="button" onClick={() => setEmuDryRun(!emuDryRun)} className={`py-2 px-1 rounded-lg text-[8px] font-black uppercase transition-all flex items-center justify-center gap-1.5 border-2 ${emuDryRun ? 'bg-rose-600 border-rose-600 text-white' : 'bg-white border-slate-200 text-slate-400'}`}>
-                                                        <Icon name="droplet" size={10} />
-                                                        Dry-Run: {emuDryRun ? 'ON' : 'OFF'}
+                                                        <Icon name="droplet" size={10} /> Dry-Run: {emuDryRun ? 'ON' : 'OFF'}
                                                     </button>
                                                 </div>
 
                                                 <button type="button" onClick={simulateData} className="w-full py-3 bg-indigo-600 text-white rounded-xl text-[9px] font-black shadow-md uppercase tracking-widest flex items-center justify-center gap-2">
-                                                    <Icon name="refresh" size={12} />
-                                                    Simulate JSON Data
+                                                    <Icon name="refresh" size={12} /> Simulate JSON Data
                                                 </button>
                                             </div>
                                         )}
