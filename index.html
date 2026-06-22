@@ -9,7 +9,8 @@
     <!-- React and dependencies -->
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Lock to stable Babel Standalone v7 to prevent ES module syntax errors -->
+    <script src="https://unpkg.com/@babel/standalone@7.23.5/babel.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/mqtt/4.3.7/mqtt.min.js"></script>
     <style>
         @keyframes spark {
@@ -22,6 +23,11 @@
         .socket-3d { transform: rotateY(15deg); box-shadow: 4px 4px 15px rgba(0,0,0,0.1); }
         .plug-3d { transform-style: preserve-3d; box-shadow: 8px 8px 15px rgba(0,0,0,0.2); }
         .level-transition { transition: height 1s cubic-bezier(0.4, 0, 0.2, 1); }
+        .status-pulse { animation: pulse-glow 2s infinite; }
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 0.6; }
+            50% { opacity: 1; }
+        }
         
         /* Hey Siri Style Edge Glow Animation */
         @keyframes siri-edge-pulse {
@@ -49,7 +55,8 @@
 <body class="bg-slate-50 text-slate-900 antialiased font-sans transition-all duration-500">
     <div id="root"></div>
 
-    <script type="text/babel">
+    <!-- Explicitly set the data-presets to enforce browser-safe ES5 translation -->
+    <script type="text/babel" data-presets="env,react">
         const { useState, useEffect, useCallback, useRef } = React;
         
         const Icon = ({ name, size = 24, className = "", strokeWidth = 2 }) => {
@@ -523,7 +530,7 @@
                     <div className="mt-8 flex flex-wrap justify-center gap-3">
                         <button onClick={() => setIsSettingsOpen(true)} className="flex items-center gap-2 px-5 py-2 rounded-full bg-white border border-slate-200 text-slate-600 hover:bg-slate-50 transition-all font-bold text-xs shadow-sm ring-1 ring-slate-100"><Icon name="settings" size={14} />Settings</button>
                         {(status === 'disconnected' || status === 'error') && (
-                            <button onClick={handleDefaultConnect} className="flex items-center gap-2 px-5 py-2 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100 transition-all font-bold text-xs shadow-sm"><Icon name="rocket" size={14} />Connect Default</button>
+                            <button onClick={handleDefaultConnect} className="flex items-center gap-2 px-5 py-2 rounded-full bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100 transition-all font-bold text-xs shadow-sm"><Icon name="rocket" size={14} />Default</button>
                         )}
                         {status === 'connected' && (
                             <button onClick={handleDisconnect} className="flex items-center gap-2 px-5 py-2 rounded-full bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100 transition-all font-bold text-xs shadow-sm"><Icon name="logout" size={14} />Disconnect</button>
